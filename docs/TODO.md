@@ -29,7 +29,7 @@ Non-goals (intentionally omitted from the subset):
 - [x] Template literals (restricted): `` `Hello ${x}` ``
 
 ### Safety/UX
-- [ ] Standardize error type and include location (`line:col`) where possible
+- [x] Standardize error type and include location (`line:col`) where possible
 - [ ] Make runtime error messages stable enough for tests
 
 ### Test coverage

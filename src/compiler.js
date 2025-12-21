@@ -7,6 +7,14 @@ export default function compile(ast) {
 
   const bytecodeVersion = 1;
 
+  let currentLoc = null;
+  function withLoc(loc, fnBody) {
+    const prev = currentLoc;
+    currentLoc = loc ?? prev;
+    try { return fnBody(); }
+    finally { currentLoc = prev; }
+  }
+
   function newFunc(name, params) {
     const fn = { name, params, consts: [], code: [], arity: params.length };
     functions.push(fn);
@@ -19,7 +27,7 @@ export default function compile(ast) {
     return fn.consts.length - 1;
   }
   function emit(fn, op, a=null, b=null) {
-    fn.code.push({ op, a, b });
+    fn.code.push({ op, a, b, loc: currentLoc });
     return fn.code.length - 1;
   }
   function patch(fn, idx, aNew) { fn.code[idx].a = aNew; }
@@ -31,9 +39,14 @@ export default function compile(ast) {
 
   return { bytecodeVersion, functions, classes };
 
-  function compileBlockLike(fn, stmts) { for (const s of stmts) compileStmt(fn, s); }
+  function compileBlockLike(fn, stmts) {
+    for (const s of stmts) {
+      withLoc(s.loc, () => compileStmt(fn, s));
+    }
+  }
 
   function compileStmt(fn, s) {
+    if (s?.loc) currentLoc = s.loc;
     switch (s.type) {
       case 'VarDecl':
         if (s.init) compileExpr(fn, s.init); else emit(fn,'CONST',constIndex(fn,{type:'null'}));
@@ -116,6 +129,7 @@ export default function compile(ast) {
   }
 
   function compileExpr(fn, e) {
+    if (e?.loc) currentLoc = e.loc;
     switch (e.type) {
       case 'Literal': emit(fn,'CONST',constIndex(fn, boxLiteral(e.value))); break;
       case 'TemplateLiteral': {

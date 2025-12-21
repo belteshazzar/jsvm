@@ -331,7 +331,10 @@ export default function createVM(bundle, { onPrint } = {}) {
         const f = functions[frame.funcIndex];
         const instr = f.code[frame.ip++];
         if (!instr) { stack.push({type:'null'}); popFrame(); continue; }
-        setLastInstr(formatInstr(f, instr, frame.ip-1));
+        setLastInstr({
+          text: formatInstr(f, instr, frame.ip-1),
+          loc: instr.loc ?? null,
+        });
 
         switch (instr.op) {
           case 'CONST': { const v = f.consts[instr.a]; stack.push(cloneValue(v)); break; }
