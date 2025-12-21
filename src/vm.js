@@ -94,7 +94,69 @@ export default function createVM(bundle, { onPrint } = {}) {
   const builtins = {
     print: { type:'native', name:'print', arity:1, call:(vm,args)=>{ const s = toStringV(args[0] ?? {type:'null'}); onPrint?.(s); return {type:'null'}; } },
     Math: MathObj,
+    JSON: {
+      type: 'obj',
+      map: {
+        parse: {
+          type: 'native',
+          name: 'JSON.parse',
+          arity: 1,
+          call: (vm, args) => {
+            const str = args[0]?.type === 'str' ? args[0].value : '';
+            try {
+              const val = JSON.parse(str);
+              return jsToBoxed(val);
+            } catch (e) {
+              return { type: 'null' };
+            }
+          }
+        },
+        stringify: {
+          type: 'native',
+          name: 'JSON.stringify',
+          arity: 1,
+          call: (vm, args) => {
+            const val = boxedToJs(args[0]);
+            try {
+              return { type: 'str', value: JSON.stringify(val) };
+            } catch (e) {
+              return { type: 'str', value: '' };
+            }
+          }
+        }
+      }
+    },
   };
+
+  // Helper: convert JS value to boxed VM value
+  function jsToBoxed(val) {
+    if (val === null) return { type: 'null' };
+    if (val === undefined) return { type: 'undef' };
+    if (typeof val === 'number') return { type: 'num', value: val };
+    if (typeof val === 'boolean') return { type: 'bool', value: val };
+    if (typeof val === 'string') return { type: 'str', value: val };
+    if (Array.isArray(val)) return { type: 'arr', items: val.map(jsToBoxed) };
+    if (typeof val === 'object') {
+      const o = { type: 'obj', map: Object.create(null) };
+      for (const k of Object.keys(val)) o.map[k] = jsToBoxed(val[k]);
+      return o;
+    }
+    return { type: 'undef' };
+  }
+
+  // Helper: convert boxed VM value to JS value
+  function boxedToJs(v) {
+    if (!v || v.type === 'null') return null;
+    if (v.type === 'undef') return undefined;
+    if (v.type === 'num' || v.type === 'bool' || v.type === 'str') return v.value;
+    if (v.type === 'arr') return v.items.map(boxedToJs);
+    if (v.type === 'obj') {
+      const o = {};
+      for (const k of Object.keys(v.map)) o[k] = boxedToJs(v.map[k]);
+      return o;
+    }
+    return undefined;
+  }
 
   function hydrateConst(v) {
     if (!v) return v;
@@ -605,6 +667,26 @@ export default function createVM(bundle, { onPrint } = {}) {
 
           case 'NOT': { const v=stack.pop(); stack.push({type:'bool', value: !isTruthy(v)}); break; }
           case 'NEG': { const v=ensureNum(stack.pop()); stack.push({type:'num', value: -v}); break; }
+          case 'TYPEOF': {
+            const v = stack.pop();
+            let t;
+            switch (v?.type) {
+              case 'num': t = 'num'; break;
+              case 'bool': t = 'bool'; break;
+              case 'str': t = 'str'; break;
+              case 'null': t = 'null'; break;
+              case 'undef': t = 'undef'; break;
+              case 'arr': t = 'arr'; break;
+              case 'obj': t = 'obj'; break;
+              case 'func': t = 'func'; break;
+              case 'native': t = 'native'; break;
+              case 'class': t = 'class'; break;
+              case 'instance': t = 'instance'; break;
+              default: t = 'undef';
+            }
+            stack.push({ type: 'str', value: t });
+            break;
+          }
 
           case 'ADD': case 'SUB': case 'MUL': case 'DIV': case 'MOD': binaryMath(instr.op); break;
           case 'LT': case 'LE': case 'GT': case 'GE':

@@ -252,7 +252,10 @@ export default function compile(ast) {
         break;
       case 'Unary':
         compileExpr(fn, e.expr);
-        if (e.op==='!') emit(fn,'NOT'); else if (e.op==='-') emit(fn,'NEG'); else panic('Bad unary');
+        if (e.op==='!') emit(fn,'NOT');
+        else if (e.op==='-') emit(fn,'NEG');
+        else if (e.op==='typeof') emit(fn,'TYPEOF');
+        else panic('Bad unary');
         break;
       case 'Binary':
         compileExpr(fn, e.left);

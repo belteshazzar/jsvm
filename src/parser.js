@@ -289,6 +289,11 @@ export default function parse(tokens) {
       const right = unary();
       return { type:'Unary', op, expr:right, loc: locFrom(tok) };
     }
+    if (at('TYPEOF')) {
+      const tok = next();
+      const right = unary();
+      return { type:'Unary', op: 'typeof', expr: right, loc: locFrom(tok) };
+    }
     if (at('NEW')) return newExpr();
     return call();
   }
