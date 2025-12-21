@@ -1,0 +1,477 @@
+
+
+let lastInstr = null;
+function formatInstr(f, instr, ip) {
+  const a = instr.a == null ? '' : ' ' + String(instr.a);
+  const b = instr.b == null ? '' : ' ' + String(instr.b);
+  return `@${ip} ${instr.op}${a}${b} in ${f.name}`;
+}
+
+export default function createVM(bundle, { onPrint } = {}) {
+  const { functions, classes } = bundle;
+
+  function isTruthy(v) { return !(v.type === 'bool' && v.value === false) && v.type !== 'null' && v.type !== 'undef'; }
+  function toStringV(v) {
+    switch (v.type) {
+      case 'num': return String(v.value);
+      case 'str': return v.value;
+      case 'bool': return v.value ? 'true' : 'false';
+      case 'null': return 'null';
+      case 'undef': return 'undefined';
+      case 'obj': return objToString(v);
+      case 'arr': return arrToString(v);
+      case 'class': return `<class ${v.name}>`;
+      case 'instance': return instanceToString(v);
+      case 'func': return `<function ${v.name ?? '<anonymous>'}>`;
+      case 'native': return `<native ${v.name}>`;
+      default: return `<${v.type}>`;
+    }
+  }
+  function objToString(o) {
+    const ks = Object.keys(o.map);
+    return '{' + ks.map(k => JSON.stringify(k)+': '+toStringV(o.map[k])).join(', ') + '}';
+  }
+  function arrToString(a) {
+    return '[' + a.items.map(toStringV).join(', ') + ']';
+  }
+  function instanceToString(inst) {
+    const ks = Object.keys(inst.fields);
+    return `${inst.cls?.name ?? 'Instance'}{` + ks.map(k => JSON.stringify(k)+': '+toStringV(inst.fields[k])).join(', ') + '}';
+  }
+
+  const isPrimitive = v => v.type==='num' || v.type==='bool' || v.type==='str' || v.type==='null' || v.type==='undef';
+  const isObjectLike = v => !isPrimitive(v);
+  function ensureNum(a) { if (a.type!=='num') panic('Expected number, got ' + a.type); return a.value; }
+  function ensureIndex(k) {
+    if (k.type!=='num') panic('Array index must be a number, got ' + k.type);
+    const n=k.value, i=n|0; if (i!==n || i<0) panic('Array index must be a non-negative integer'); return i;
+  }
+  function keyToString(k) {
+    if (k.type==='str') return k.value;
+    if (k.type==='num') return String(k.value);
+    if (k.type==='bool') return k.value?'true':'false';
+    if (k.type==='null') return 'null';
+    panic('Invalid property key type: ' + k.type);
+  }
+
+  // ---- Environments (lexical) ----
+  function Env(parent = null) { return { map: Object.create(null), parent }; }
+  function envGet(env, name) {
+    for (let e = env; e; e = e.parent) { if (name in e.map) return e.map[name]; }
+    panic(`Undefined variable '${name}'`);
+  }
+  function envSet(env, name, value) {
+    for (let e = env; e; e = e.parent) { if (name in e.map) { e.map[name] = value; return value; } }
+    panic(`Undefined variable '${name}'`);
+  }
+  function envDefine(env, name, value) { env.map[name] = value; return value; }
+
+  function binaryMath(op) {
+    const b=stack.pop(), a=stack.pop();
+    if (op==='ADD' && (a.type==='str' || b.type==='str')) { stack.push({type:'str', value: toStringV(a)+toStringV(b)}); return; }
+    const an=ensureNum(a), bn=ensureNum(b);
+    const r = ({ADD:an+bn, SUB:an-bn, MUL:an*bn, DIV:an/bn, MOD:an%bn})[op];
+    stack.push({type:'num', value:r});
+  }
+  function binaryCmp(op) {
+    const b=stack.pop(), a=stack.pop();
+    function eq(a,b){
+      if (a.type!==b.type) return false;
+      if (a.type==='num'||a.type==='bool'||a.type==='str') return a.value===b.value;
+      if (a.type==='null'||a.type==='undef') return true;
+      return a===b;
+    }
+    let res;
+    if (op==='EQ'||op==='NE'){ const e=eq(a,b); res = (op==='EQ')?e:!e; }
+    else { const an=ensureNum(a), bn=ensureNum(b);
+      res = ({LT:an<bn, LE:an<=bn, GT:an>bn, GE:an>=bn})[op];
+    }
+    stack.push({type:'bool', value: !!res});
+  }
+
+  function protoLookup(proto, prop) {
+    for (let p=proto; p; p=p.proto) {
+      if (p.type!=='proto') break;
+      if (prop in p.map) return p.map[prop];
+    }
+    return null;
+  }
+
+  // ---- Array instance methods ----
+  const ARRAY_METHODS = new Set([
+    'push','pop','slice','indexOf','includes','join',
+    'shift','unshift','splice','reverse','sort','concat'
+  ]);
+  function strictEq(a,b){
+    if (a.type!==b.type) return false;
+    if (a.type==='num'||a.type==='bool'||a.type==='str') return a.value===b.value;
+    if (a.type==='null'||a.type==='undef') return true;
+    return a===b;
+  }
+  function arrayMethodNative(name) {
+    return { type:'native', name:'Array.'+name, arity:null, call:(vm, args, thisObj) => {
+      if (!thisObj || thisObj.type!=='arr') panic('Array method called with invalid this');
+      const arr = thisObj;
+      switch (name) {
+        case 'push':
+          for (const v of args) arr.items.push(v);
+          return {type:'num', value: arr.items.length};
+        case 'pop':
+          return arr.items.length? arr.items.pop() : {type:'null'};
+        case 'shift':
+          return arr.items.length? arr.items.shift() : {type:'null'};
+        case 'unshift':
+          for (let i=0;i<args.length;i++) arr.items.splice(i,0,args[i]);
+          return {type:'num', value: arr.items.length};
+        case 'slice': {
+          const len=arr.items.length;
+          const toInt=v=> (v==null || v.type==='null'||v.type==='undef')?null : (v.type==='num'? (v.value|0) : panic('slice indices must be numbers'));
+          let start=toInt(args[0]), end=toInt(args[1]);
+          if (start==null) start=0; if (end==null) end=len;
+          if (start<0) start=Math.max(0,len+start); if (end<0) end=Math.max(0,len+end);
+          start=Math.min(Math.max(0,start),len); end=Math.min(Math.max(0,end),len);
+          return {type:'arr', items: arr.items.slice(start,end)};
+        }
+        case 'splice': {
+          const len=arr.items.length;
+          const toInt=v=> (v==null || v.type==='null'||v.type==='undef')?0 : (v.type==='num'? (v.value|0) : panic('splice indices must be numbers'));
+          let start = toInt(args[0]);
+          if (start < 0) start = Math.max(0, len + start);
+          if (start > len) start = len;
+          let deleteCount = (args.length >= 2 && args[1].type==='num') ? Math.max(0, args[1].value|0) : (len - start);
+          deleteCount = Math.min(deleteCount, len - start);
+          const itemsToInsert = args.slice(2);
+          const removed = arr.items.splice(start, deleteCount, ...itemsToInsert);
+          return { type:'arr', items: removed };
+        }
+        case 'reverse':
+          arr.items.reverse();
+          return arr;
+        case 'sort': {
+          // No comparator callback support (yet).
+          if (args[0] && (args[0].type==='func' || args[0].type==='native')) {
+            panic('Array.sort comparator callbacks not supported in this sandbox');
+          }
+          arr.items.sort((a,b) => {
+            if (a.type==='num' && b.type==='num') return a.value - b.value;
+            const as = vm.toStringV(a), bs = vm.toStringV(b);
+            return as < bs ? -1 : as > bs ? 1 : 0;
+          });
+          return arr;
+        }
+        case 'concat': {
+          const out = [];
+          for (const v of arr.items) out.push(v);
+          for (const x of args) {
+            if (x && x.type==='arr') out.push(...x.items);
+            else out.push(x);
+          }
+          return { type:'arr', items: out };
+        }
+        case 'indexOf': {
+          const search = args[0] ?? {type:'null'};
+          const from = (args[1] && args[1].type==='num') ? (args[1].value|0) : 0;
+          for (let i=Math.max(0,from); i<arr.items.length; i++) if (strictEq(arr.items[i], search)) return {type:'num', value:i};
+          return {type:'num', value:-1};
+        }
+        case 'includes': {
+          const search = args[0] ?? {type:'null'};
+          const from = (args[1] && args[1].type==='num') ? (args[1].value|0) : 0;
+          for (let i=Math.max(0,from); i<arr.items.length; i++) if (strictEq(arr.items[i], search)) return {type:'bool', value:true};
+          return {type:'bool', value:false};
+        }
+        case 'join': {
+          const sep = (args[0] && args[0].type==='str') ? args[0].value : ',';
+          return {type:'str', value: arr.items.map(vm.toStringV).join(sep)};
+        }
+      }
+      panic('Unknown array method');
+    }};
+  }
+
+  // ---- Builtins ----
+  const builtins = {
+    print: { type:'native', name:'print', arity:1, call:(vm,args)=>{ const s = toStringV(args[0] ?? {type:'null'}); onPrint?.(s); return {type:'null'}; } },
+  };
+
+  function makeClosure(funcIndex, env) { const f = functions[funcIndex]; return { type:'func', name:f.name, funcIndex, env }; }
+
+  const homeProtoByFuncIndex = Object.create(null);
+
+  const stack = [];
+  const callstack = [];
+  const globals = Env(null);
+  for (const k of Object.keys(builtins)) globals.map[k]=builtins[k];
+
+  function pushFrame(funcValue, args, thisObj=null, flags={}) {
+    if (funcValue.type==='native') {
+      const r = funcValue.call(vm, args, thisObj);
+      stack.push(r ?? {type:'null'});
+      return;
+    }
+    if (funcValue.type!=='func') panic('Attempt to call non-function: '+funcValue.type);
+    const f = functions[funcValue.funcIndex];
+    const env = Env(funcValue.env);
+    for (let i=0;i<f.params.length;i++) envDefine(env, f.params[i], args[i] ?? {type:'null'});
+    callstack.push({ funcIndex: funcValue.funcIndex, ip:0, env, thisObj, isCtor: !!flags.isCtor, isDerived: !!flags.isDerived, superCalled: !!flags.superCalled });
+  }
+  function popFrame(){ return callstack.pop(); }
+
+  function makeClass(classIndex, env) {
+    const meta = classes[classIndex];
+    let superClass = null;
+    if (meta.superName) {
+      const v = envGet(env, meta.superName);
+      if (!v || v.type!=='class') panic(`'${meta.name}' extends non-class '${meta.superName}'`);
+      superClass = v;
+    }
+    const proto = { type:'proto', map:Object.create(null), proto: superClass ? superClass.proto : null };
+    const ctor = meta.ctorIndex != null ? makeClosure(meta.ctorIndex, env) : null;
+    const cls = { type:'class', name: meta.name, ctor, proto, super: superClass };
+    for (const m of meta.methods) {
+      const clos = makeClosure(m.funcIndex, env);
+      proto.map[m.name] = clos;
+      homeProtoByFuncIndex[m.funcIndex] = proto;
+    }
+    if (meta.ctorIndex != null) homeProtoByFuncIndex[meta.ctorIndex] = proto;
+    return cls;
+  }
+  function makeInstance(cls) { return { type:'instance', cls, fields:Object.create(null), proto: cls.proto }; }
+
+  // ---- Property operations ----
+  function getPropValue(recv, prop) {
+    if (recv.type==='arr') {
+      if (prop==='length') return {type:'num', value: recv.items.length};
+      if (ARRAY_METHODS.has(prop)) return arrayMethodNative(prop);
+      panic("Unknown array property: " + prop);
+    }
+    if (recv.type==='instance') {
+      if (prop in recv.fields) return recv.fields[prop];
+      const m = protoLookup(recv.proto, prop);
+      return m ?? {type:'null'};
+    }
+    if (recv.type==='obj') {
+      return (prop in recv.map) ? recv.map[prop] : {type:'null'};
+    }
+    panic('GET_PROP on unsupported type: ' + recv.type);
+  }
+  function setPropValue(recv, prop, value) {
+    if (recv.type==='arr') {
+      if (prop==='length' || ARRAY_METHODS.has(prop)) panic("Cannot assign to read-only array property: " + prop);
+      panic("Unknown array property: " + prop);
+    }
+    if (recv.type==='instance') { recv.fields[prop]=value; return; }
+    if (recv.type==='obj') { recv.map[prop]=value; return; }
+    panic('SET_PROP on unsupported type: ' + recv.type);
+  }
+  function getElemValue(recv, key) {
+    if (recv.type==='arr') {
+      if (key.type==='str' && key.value==='length') return {type:'num', value: recv.items.length};
+      const idx = ensureIndex(key);
+      return (idx < recv.items.length) ? recv.items[idx] : {type:'null'};
+    }
+    if (recv.type==='obj') {
+      const prop = keyToString(key);
+      return (prop in recv.map) ? recv.map[prop] : {type:'null'};
+    }
+    if (recv.type==='instance') {
+      const prop = keyToString(key);
+      if (prop in recv.fields) return recv.fields[prop];
+      const m = protoLookup(recv.proto, prop);
+      return m ?? {type:'null'};
+    }
+    panic('GET_ELEM on unsupported type: ' + recv.type);
+  }
+  function setElemValue(recv, key, value) {
+    if (recv.type==='arr') {
+      const idx = ensureIndex(key);
+      while (recv.items.length < idx) recv.items.push({type:'null'});
+      recv.items[idx] = value; return;
+    }
+    if (recv.type==='obj') { recv.map[keyToString(key)] = value; return; }
+    if (recv.type==='instance') { recv.fields[keyToString(key)] = value; return; }
+    panic('SET_ELEM on unsupported type: ' + recv.type);
+  }
+
+  // ---- VM core loop ----
+  const vm = {
+    toStringV,
+    runMain() {
+      const main = makeClosure(0, globals);
+      pushFrame(main, []);
+      while (callstack.length>0) {
+        const frame = callstack[callstack.length-1];
+        const f = functions[frame.funcIndex];
+        const instr = f.code[frame.ip++];
+        if (!instr) { stack.push({type:'null'}); popFrame(); continue; }
+        lastInstr = formatInstr(f, instr, frame.ip-1);
+
+        switch (instr.op) {
+          case 'CONST': { const v = f.consts[instr.a]; stack.push(cloneValue(v)); break; }
+          case 'POP': stack.pop(); break;
+          case 'DUP': stack.push(stack[stack.length-1]); break;
+
+          case 'LOAD_NAME': stack.push(envGet(frame.env, instr.a)); break;
+          case 'STORE_NAME': { const val = stack[stack.length-1]; envSet(frame.env, instr.a, val); break; }
+          case 'DEFINE_NAME': { const val = stack.pop(); envDefine(frame.env, instr.a, val); break; }
+
+          case 'LOAD_THIS': {
+            if (frame.isCtor && frame.isDerived && !frame.superCalled) panic("Cannot access 'this' before calling super()");
+            const t = frame.thisObj ?? {type:'undef'};
+            stack.push(t);
+            break;
+          }
+
+          case 'MAKE_FUNCTION': stack.push(makeClosure(instr.a, frame.env)); break;
+
+          case 'CALL': {
+            const argc = instr.a;
+            const args = new Array(argc);
+            for (let k=argc-1;k>=0;k--) args[k]=stack.pop();
+            const callee = stack.pop();
+            if (callee.type!=='func' && callee.type!=='native') panic('Attempt to call a non-function value: ' + callee.type);
+            pushFrame(callee, args, /*this*/null, {});
+            break;
+          }
+
+          case 'CALL_PROP': {
+            const argc = instr.a;
+            const args = new Array(argc);
+            for (let k=argc-1;k>=0;k--) args[k]=stack.pop();
+            const key = stack.pop();
+            const recv = stack.pop();
+            const prop = keyToString(key);
+            const callee = getPropValue(recv, prop);
+            if (callee.type!=='func' && callee.type!=='native') panic('Attempt to call non-function property: ' + prop);
+            pushFrame(callee, args, recv, {});
+            break;
+          }
+
+          case 'CALL_ELEM': {
+            const argc = instr.a;
+            const args = new Array(argc);
+            for (let k=argc-1;k>=0;k--) args[k]=stack.pop();
+            const key = stack.pop();
+            const recv = stack.pop();
+            const callee = getElemValue(recv, key);
+            if (callee.type!=='func' && callee.type!=='native') panic('Attempt to call non-function element');
+            pushFrame(callee, args, recv, {});
+            break;
+          }
+
+          case 'CALL_SUPER_CTOR': {
+            const argc = instr.a;
+            const args = new Array(argc);
+            for (let k=argc-1;k>=0;k--) args[k]=stack.pop();
+            if (!frame.isCtor) panic("super() used outside of constructor");
+            const inst = frame.thisObj;
+            const cls = inst?.cls;
+            if (!cls || !cls.super) panic("Class has no super to call");
+            if (frame.superCalled) panic("super() called multiple times");
+            const superCtor = cls.super.ctor;
+            frame.superCalled = true;
+            if (superCtor) pushFrame(superCtor, args, inst, { isCtor:true, isDerived:false, superCalled:true });
+            break;
+          }
+
+          case 'CALL_SUPER_METHOD': {
+            const methodName = instr.a; const argc = instr.b;
+            const args = new Array(argc);
+            for (let k=argc-1;k>=0;k--) args[k]=stack.pop();
+            const homeProto = homeProtoByFuncIndex[frame.funcIndex];
+            if (!homeProto) panic("super.method used outside of a class method");
+            const parentProto = homeProto.proto;
+            if (!parentProto) panic("No super class for this method");
+            const callee = protoLookup(parentProto, methodName);
+            if (!callee) panic(`Super method '${methodName}' not found`);
+            pushFrame(callee, args, frame.thisObj, {});
+            break;
+          }
+
+          case 'RET': {
+            const ret = stack.pop();
+            const finished = popFrame();
+            if (finished?.isCtor) {
+              if (finished.isDerived && !finished.superCalled) panic("Derived constructor must call super()");
+              stack.push(isObjectLike(ret) ? ret : (finished.thisObj ?? {type:'undef'}));
+            } else {
+              stack.push(ret ?? {type:'null'});
+            }
+            break;
+          }
+
+          case 'JMP': frame.ip = instr.a; break;
+          case 'JMP_IF_FALSE': { const v = stack[stack.length-1]; if (!isTruthy(v)) frame.ip = instr.a; break; }
+          case 'JMP_IF_TRUE':  { const v = stack[stack.length-1]; if (isTruthy(v))  frame.ip = instr.a; break; }
+
+          case 'NOT': { const v=stack.pop(); stack.push({type:'bool', value: !isTruthy(v)}); break; }
+          case 'NEG': { const v=ensureNum(stack.pop()); stack.push({type:'num', value: -v}); break; }
+
+          case 'ADD': case 'SUB': case 'MUL': case 'DIV': case 'MOD': binaryMath(instr.op); break;
+          case 'LT': case 'LE': case 'GT': case 'GE': case 'EQ': case 'NE': binaryCmp(instr.op); break;
+
+          case 'MAKE_OBJ': stack.push({type:'obj', map:Object.create(null)}); break;
+          case 'GET_PROP': {
+            const key = stack.pop(); const recv = stack.pop(); const prop = keyToString(key);
+            const val = getPropValue(recv, prop);
+            stack.push(val);
+            break;
+          }
+          case 'SET_PROP': {
+            const value = stack.pop(); const key = stack.pop(); const recv = stack.pop();
+            setPropValue(recv, keyToString(key), value);
+            stack.push(value); break;
+          }
+
+          case 'MAKE_ARR': stack.push({type:'arr', items:[]}); break;
+          case 'APPEND_ELEM': {
+            const value = stack.pop(); const arr = stack.pop();
+            if (arr.type!=='arr') panic('APPEND_ELEM on non-array: '+arr.type);
+            arr.items.push(value); stack.push(value); break;
+          }
+          case 'GET_ELEM': {
+            const key = stack.pop(); const recv = stack.pop();
+            const val = getElemValue(recv, key);
+            stack.push(val); break;
+          }
+          case 'SET_ELEM': {
+            const value = stack.pop(); const key = stack.pop(); const recv = stack.pop();
+            setElemValue(recv, key, value); stack.push(value); break;
+          }
+
+          case 'MAKE_CLASS': { const cls = makeClass(instr.a, frame.env); stack.push(cls); break; }
+          case 'NEW': {
+            const argc = instr.a;
+            const args = new Array(argc);
+            for (let k=argc-1;k>=0;k--) args[k]=stack.pop();
+            const cls = stack.pop();
+            if (cls.type!=='class') panic('Attempt to instantiate non-class: '+cls.type);
+            const inst = makeInstance(cls);
+            if (cls.ctor) {
+              const isDerived = !!cls.super;
+              pushFrame(cls.ctor, args, inst, { isCtor:true, isDerived, superCalled: !isDerived });
+            } else {
+              stack.push(inst);
+            }
+            break;
+          }
+
+          default: panic('Unknown opcode: ' + instr.op);
+        }
+      }
+      return stack.pop();
+    },
+  };
+
+  function cloneValue(v) {
+    if (v.type==='num'||v.type==='bool') return {type:v.type, value:v.value};
+    if (v.type==='null') return {type:'null'};
+    if (v.type==='undef') return {type:'undef'};
+    if (v.type==='str') return {type:'str', value:v.value};
+    if (v.type==='obj') { const o={type:'obj', map:Object.create(null)}; for (const k of Object.keys(v.map)) o.map[k]=v.map[k]; return o; }
+    if (v.type==='arr') { return {type:'arr', items:v.items.slice()}; }
+    return v; // classes/instances/functions/natives are identity
+  }
+
+  return vm;
+}

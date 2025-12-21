@@ -1,0 +1,24 @@
+{
+  "name": "jsvm",
+  "version": "1.0.0",
+  "description": "",
+  "homepage": "https://github.com/belteshazzar/jsvm#readme",
+  "bugs": {
+    "url": "https://github.com/belteshazzar/jsvm/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/belteshazzar/jsvm.git"
+  },
+  "license": "BSD-2-Clause",
+  "author": "",
+  "type": "module",
+  "main": "main.js",
+  "scripts": {
+    "test": "vitest",
+    "test:watch": "vitest --watchAll"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  }
+}
