@@ -26,7 +26,7 @@ Non-goals (intentionally omitted from the subset):
 - [x] Ternary operator: `cond ? a : b`
 - [ ] Nullish coalescing `??`
 - [ ] Optional chaining `?.` (property + call variants as feasible)
-- [ ] Template literals (restricted): `` `Hello ${x}` ``
+- [x] Template literals (restricted): `` `Hello ${x}` ``
 
 ### Safety/UX
 - [ ] Standardize error type and include location (`line:col`) where possible

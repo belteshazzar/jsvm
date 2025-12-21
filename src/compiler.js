@@ -118,6 +118,20 @@ export default function compile(ast) {
   function compileExpr(fn, e) {
     switch (e.type) {
       case 'Literal': emit(fn,'CONST',constIndex(fn, boxLiteral(e.value))); break;
+      case 'TemplateLiteral': {
+        // Lower to left-to-right string concatenation.
+        // quasis length is expressions length + 1 (allow empty chunks).
+        const first = String(e.quasis?.[0] ?? '');
+        emit(fn,'CONST',constIndex(fn, { type: 'str', value: first }));
+        for (let i = 0; i < e.expressions.length; i++) {
+          compileExpr(fn, e.expressions[i]);
+          emit(fn, 'ADD');
+          const tail = String(e.quasis?.[i + 1] ?? '');
+          emit(fn,'CONST',constIndex(fn, { type: 'str', value: tail }));
+          emit(fn, 'ADD');
+        }
+        break;
+      }
       case 'Identifier': emit(fn,'LOAD_NAME', e.name); break;
       case 'This': emit(fn,'LOAD_THIS'); break;
       case 'NewExpr':

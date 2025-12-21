@@ -5,7 +5,11 @@ export default function parse(tokens) {
   let i = 0;
   function peek() { return tokens[i]; }
   function at(type) { return peek().type === type; }
+  function check(type) { return at(type); }
   function next() { return tokens[i++]; }
+  function prev() { return tokens[i - 1]; }
+  function match(type) { if (at(type)) { next(); return true; } return false; }
+  function consume(type, msg) { return expect(type, msg); }
   function expect(type, msg) {
     if (!at(type)) panic(msg ?? `Expected ${type} but found ${peek().type}`, peek());
     return next();
@@ -278,6 +282,21 @@ export default function parse(tokens) {
     if (at('THIS')) { next(); return { type:'This' }; }
     if (at('SUPER')) { next(); return { type:'Super' }; }
     if (at('IDENT')) return { type:'Identifier', name: next().value };
+    if (match('TEMPLATE_START')) {
+      const quasis = [];
+      const expressions = [];
+      while (!check('TEMPLATE_END')) {
+        if (match('TEMPLATE_CHUNK')) {
+          quasis.push(prev().value);
+          continue;
+        }
+        consume('TEMPLATE_EXPR_START', 'Expected `${` in template literal');
+        expressions.push(expr());
+        consume('TEMPLATE_EXPR_END', 'Expected `}` after template expression');
+      }
+      consume('TEMPLATE_END', 'Unterminated template literal');
+      return { type: 'TemplateLiteral', quasis, expressions };
+    }
     if (at('LPAREN')) { next(); const e=expr(); expect('RPAREN',"Expected ')'"); return e; }
     if (at('LBRACE')) return objectLiteral();
     if (at('LBRACK')) return arrayLiteral();

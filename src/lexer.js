@@ -9,6 +9,9 @@ export default function tokenize(input) {
   const tokens = [];
   let i = 0, line = 1, col = 1;
 
+  let templateDepth = 0;
+  let interpDepth = 0;
+
   function peek() { return input[i] ?? '\0'; }
   function next() {
     const ch = input[i++] ?? '\0';
@@ -48,6 +51,55 @@ export default function tokenize(input) {
     const startLine = line, startCol = col;
     const c = peek();
     if (c === '\0') { add('EOF'); break; }
+
+    // Template mode: lex until next `${` or closing backtick.
+    if (templateDepth > 0 && interpDepth === 0) {
+      if (c === '`') {
+        next();
+        templateDepth--;
+        add('TEMPLATE_END');
+        continue;
+      }
+      let s = '';
+      while (true) {
+        const ch = peek();
+        if (ch === '\0') panic('Unterminated template literal', { line, col });
+        if (ch === '`' || (ch === '$' && input[i+1] === '{')) break;
+        if (ch === '\\') {
+          next();
+          const esc = next();
+          const map = { 'n': '\n', 't': '\t', 'r': '\r', '`': '`', '$': '$', '\\': '\\' };
+          s += map[esc] ?? esc;
+        } else {
+          s += next();
+        }
+      }
+      add('TEMPLATE_CHUNK', s);
+      if (peek() === '$' && input[i+1] === '{') {
+        next();
+        next();
+        interpDepth++;
+        add('TEMPLATE_EXPR_START');
+        continue;
+      }
+      // closing backtick handled on next loop
+      continue;
+    }
+
+    if (c === '`') {
+      next();
+      templateDepth++;
+      add('TEMPLATE_START');
+      continue;
+    }
+
+    // Inside template interpolation, treat `}` as end of expression.
+    if (c === '}' && interpDepth > 0) {
+      next();
+      interpDepth--;
+      add('TEMPLATE_EXPR_END');
+      continue;
+    }
 
     if (isAlpha(c)) {
       let s = '';
