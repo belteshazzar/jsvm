@@ -25,7 +25,7 @@ Non-goals (intentionally omitted from the subset):
 - [x] Strict equality: `===` and `!==`
 - [x] Ternary operator: `cond ? a : b`
 - [x] Nullish coalescing `??`
-- [ ] Optional chaining `?.` (property + call variants as feasible)
+- [x] Optional chaining `?.` (property + call variants as feasible)
 - [x] Template literals (restricted): `` `Hello ${x}` ``
 
 ### Safety/UX

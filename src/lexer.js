@@ -139,8 +139,15 @@ export default function tokenize(input) {
       continue;
     }
 
-    const two = c + input[i+1];
+
+
     const three = c + input[i+1] + input[i+2];
+    if (three === '?.[') { next(); next(); add('QDOT'); /* do not consume [ here */ continue; }
+    if (three === '?.(') { next(); next(); add('QDOT'); /* do not consume ( here */ continue; }
+
+    const two = c + input[i+1];
+    if (two === '?.') { next(); next(); add('QDOT'); continue; }
+
     const threeOps = ['===','!=='];
     if (threeOps.includes(three)) { next(); next(); next(); add(three); continue; }
 

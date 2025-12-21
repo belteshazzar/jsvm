@@ -254,6 +254,33 @@ export default function parse(tokens) {
   function call() {
     let callee = primary();
     for (;;) {
+      if (at('QDOT')) {
+        const qdot = next();
+        if (at('IDENT')) {
+          const nameTok = next();
+          const keyLit = { type:'Literal', value: String(nameTok.value) };
+          callee = { type: 'OptChain', chainType: 'prop', object: callee, property: keyLit, loc: locFrom(qdot) };
+          continue;
+        }
+        if (at('LBRACK')) {
+          const lb = next();
+          const keyExpr = expr();
+          expect('RBRACK', "Expected ']' after ?. [expr]");
+          callee = { type: 'OptChain', chainType: 'elem', object: callee, property: keyExpr, loc: locFrom(qdot) };
+          continue;
+        }
+        if (at('LPAREN')) {
+          const lp = next();
+          const args = [];
+          if (!at('RPAREN')) {
+            do { args.push(expr()); } while (at('COMMA') && next());
+          }
+          expect('RPAREN', "Expected ')' after ?. (args)");
+          callee = { type: 'OptChain', chainType: 'call', object: callee, args, loc: locFrom(qdot) };
+          continue;
+        }
+        panic("Invalid optional chain after ?.", peek());
+      }
       if (at('LPAREN')) {
         const lp = next();
         const args = [];

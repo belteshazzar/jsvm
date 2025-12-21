@@ -404,6 +404,43 @@ export default function createVM(bundle, { onPrint } = {}) {
             break;
           }
 
+          case 'OPT_CHAIN_PROP': {
+            const key = stack.pop();
+            const recv = stack.pop();
+            if (recv.type === 'null' || recv.type === 'undef') {
+              stack.push({ type: 'undef' });
+            } else {
+              const prop = keyToString(key);
+              const val = getPropValue(recv, prop);
+              stack.push(val);
+            }
+            break;
+          }
+          case 'OPT_CHAIN_ELEM': {
+            const key = stack.pop();
+            const recv = stack.pop();
+            if (recv.type === 'null' || recv.type === 'undef') {
+              stack.push({ type: 'undef' });
+            } else {
+              const val = getElemValue(recv, key);
+              stack.push(val);
+            }
+            break;
+          }
+          case 'OPT_CHAIN_CALL': {
+            const argc = instr.a;
+            const args = new Array(argc);
+            for (let k = argc - 1; k >= 0; k--) args[k] = stack.pop();
+            const callee = stack.pop();
+            if (callee.type === 'null' || callee.type === 'undef') {
+              stack.push({ type: 'undef' });
+            } else {
+              if (callee.type !== 'func' && callee.type !== 'native') panic('Attempt to call non-function value via optional chain: ' + callee.type);
+              pushFrame(callee, args, null, {});
+            }
+            break;
+          }
+
           case 'CALL_SUPER_CTOR': {
             const argc = instr.a;
             const args = new Array(argc);

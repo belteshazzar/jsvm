@@ -254,6 +254,30 @@ export default function compile(ast) {
           emit(fn,'POP');
         }
         break;
+      case 'OptChain':
+        compileExpr(fn, e.object);
+        if (e.chainType === 'prop') {
+          compileExpr(fn, e.property);
+          emit(fn, 'OPT_CHAIN_PROP');
+        } else if (e.chainType === 'elem') {
+          compileExpr(fn, e.property);
+          emit(fn, 'OPT_CHAIN_ELEM');
+        } else if (e.chainType === 'call') {
+          const argc = e.args.length;
+          for (const a of e.args) compileExpr(fn, a);
+          emit(fn, 'OPT_CHAIN_CALL', argc);
+        } else {
+          panic('Unknown OptChain type: ' + e.chainType);
+        }
+        break;
+        emit(fn,'MAKE_ARR');
+        for (const el of e.elements) {
+          emit(fn,'DUP');
+          compileExpr(fn, el);
+          emit(fn,'APPEND_ELEM');
+          emit(fn,'POP');
+        }
+        break;
       case 'Member':
         compileExpr(fn, e.object);
         compileExpr(fn, e.property);
