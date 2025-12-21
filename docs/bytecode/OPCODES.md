@@ -81,6 +81,10 @@ Note: `EQ/NE` are type-strict in this implementation (values of different `type`
   - Semantics: expects stack top to be a `func` value; sets `func.bindName = a`.
   - Stack: `(..., fn) -> (..., fn)`
   - Runtime effect: when the function is later called, the VM defines `const <a> = <fn>` in the function's call environment, making named function expressions self-referential (supports recursion) without defining `<a>` in the outer scope.
+- `CAPTURE_THIS`: annotate the function value on top of the stack with a lexical `this` binding.
+  - Semantics: expects stack top to be a `func` value; sets `func.lexThis = currentFrame.thisObj` (may be `null`).
+  - Stack: `(..., fn) -> (..., fn)`
+  - Runtime effect: when the function is later called, the VM uses `fn.lexThis` as `this` for the call, ignoring receiver binding from `CALL_PROP` / `CALL_ELEM`.
 - `CALL a`: call with `a` args.
 - `CALL_PROP a`: call recv[prop] with `a` args (binds `this` to recv).
 - `CALL_ELEM a`: call recv[key] with `a` args (binds `this` to recv).

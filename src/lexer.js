@@ -151,10 +151,11 @@ export default function tokenize(input) {
     const threeOps = ['===','!=='];
     if (threeOps.includes(three)) { next(); next(); next(); add(three); continue; }
 
-    const twoOps = ['==','!=','<=','>=','&&','||','??'];
+    const twoOps = ['==','!=','<=','>=','&&','||','??','=>'];
     if (twoOps.includes(two)) {
       next(); next();
       if (two === '??') add('DOUBLE_QMARK');
+      else if (two === '=>') add('ARROW');
       else add(two);
       continue;
     }

@@ -15,6 +15,9 @@ export default function parse(tokens) {
     if (!tok) return null;
     return { line: tok.line, col: tok.col };
   }
+
+  function checkpoint() { return i; }
+  function restore(cp) { i = cp; }
   function expect(type, msg) {
     if (!at(type)) panic(msg ?? `Expected ${type} but found ${peek().type}`, peek());
     return next();
@@ -341,7 +344,25 @@ export default function parse(tokens) {
       const body = block();
       return { type:'FuncExpr', name, params, body, loc: locFrom(start) };
     }
-    if (at('IDENT')) { const t = next(); return { type:'Identifier', name: t.value, loc: locFrom(t) }; }
+    if (at('IDENT')) {
+      const t = next();
+      // Arrow function: x => expr
+      if (at('ARROW')) {
+        const arrowTok = next();
+        const params = [t.value];
+        let body;
+        let bodyType;
+        if (at('LBRACE')) {
+          body = block();
+          bodyType = 'block';
+        } else {
+          body = assignment();
+          bodyType = 'expr';
+        }
+        return { type:'ArrowFunc', params, body, bodyType, loc: locFrom(arrowTok) };
+      }
+      return { type:'Identifier', name: t.value, loc: locFrom(t) };
+    }
     if (match('TEMPLATE_START')) {
       const startTok = prev();
       const quasis = [];
@@ -358,7 +379,45 @@ export default function parse(tokens) {
       consume('TEMPLATE_END', 'Unterminated template literal');
       return { type: 'TemplateLiteral', quasis, expressions, loc: locFrom(startTok) };
     }
-    if (at('LPAREN')) { next(); const e=expr(); expect('RPAREN',"Expected ')'"); return e; }
+    if (at('LPAREN')) {
+      const cp = checkpoint();
+      const lp = next();
+
+      // Try parse arrow params: () => ..., (x) => ..., (x,y) => ...
+      const params = [];
+      let isParamList = true;
+      if (!at('RPAREN')) {
+        for (;;) {
+          if (!at('IDENT')) { isParamList = false; break; }
+          params.push(next().value);
+          if (at('COMMA')) { next(); continue; }
+          break;
+        }
+      }
+      if (isParamList && at('RPAREN')) {
+        next();
+        if (at('ARROW')) {
+          const arrowTok = next();
+          let body;
+          let bodyType;
+          if (at('LBRACE')) {
+            body = block();
+            bodyType = 'block';
+          } else {
+            body = assignment();
+            bodyType = 'expr';
+          }
+          return { type:'ArrowFunc', params, body, bodyType, loc: locFrom(arrowTok) };
+        }
+      }
+
+      // Not an arrow; restore and parse as grouped expression.
+      restore(cp);
+      next();
+      const e = expr();
+      expect('RPAREN',"Expected ')'");
+      return e;
+    }
     if (at('LBRACE')) return objectLiteral();
     if (at('LBRACK')) return arrayLiteral();
     panic("Expected expression", peek());

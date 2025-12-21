@@ -287,6 +287,21 @@ export default function compile(ast) {
         }
         break;
       }
+
+      case 'ArrowFunc': {
+        const f = newFunc('<arrow>', e.params);
+        if (e.bodyType === 'expr') {
+          compileExpr(f, e.body);
+          emit(f, 'RET');
+        } else {
+          compileBlockLike(f, e.body.body);
+          emit(f, 'CONST', constIndex(f, { type: 'null' }));
+          emit(f, 'RET');
+        }
+        emit(fn, 'MAKE_FUNCTION', functions.indexOf(f));
+        emit(fn, 'CAPTURE_THIS');
+        break;
+      }
       case 'Member':
         compileExpr(fn, e.object);
         compileExpr(fn, e.property);

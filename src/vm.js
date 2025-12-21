@@ -246,7 +246,8 @@ export default function createVM(bundle, { onPrint } = {}) {
     if (funcValue.bindName) {
       envDefineConst(env, funcValue.bindName, funcValue);
     }
-    callstack.push({ funcIndex: funcValue.funcIndex, ip:0, env, thisObj, isCtor: !!flags.isCtor, isDerived: !!flags.isDerived, superCalled: !!flags.superCalled });
+    const effectiveThis = funcValue.lexThis !== undefined ? funcValue.lexThis : thisObj;
+    callstack.push({ funcIndex: funcValue.funcIndex, ip:0, env, thisObj: effectiveThis, isCtor: !!flags.isCtor, isDerived: !!flags.isDerived, superCalled: !!flags.superCalled });
   }
   function popFrame(){ return callstack.pop(); }
 
@@ -359,6 +360,14 @@ export default function createVM(bundle, { onPrint } = {}) {
             const v = stack[stack.length - 1];
             if (!v || v.type !== 'func') panic('BIND_FUNC_NAME on non-function');
             v.bindName = String(instr.a);
+            break;
+          }
+
+          case 'CAPTURE_THIS': {
+            const v = stack[stack.length - 1];
+            if (!v || v.type !== 'func') panic('CAPTURE_THIS on non-function');
+            // Lexically capture the current frame's `this` value.
+            v.lexThis = frame.thisObj ?? null;
             break;
           }
 
