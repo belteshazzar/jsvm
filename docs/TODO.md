@@ -44,8 +44,10 @@ Non-goals (intentionally omitted from the subset):
 ### Language features
 - [x] Function expressions
 - [x] Arrow functions (no `this` binding; closure-only)
-- [ ] `for (init; cond; post)` loop (compile to while)
-- [ ] `break` / `continue`
+- [x] `for (init; cond; post)` loop (compile to while)
+- [x] `for..in` loop over property keys
+- [x] `for..of` loop over property values
+- [x] `break` / `continue`
 - [ ] `switch` (optional)
 
 ### Test coverage

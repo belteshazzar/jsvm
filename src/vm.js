@@ -54,6 +54,34 @@ export default function createVM(bundle, { onPrint } = {}) {
     return `${inst.cls?.name ?? 'Instance'}{` + ks.map(k => JSON.stringify(k)+': '+toStringV(inst.fields[k])).join(', ') + '}';
   }
 
+  function iterFrom(v) {
+    if (v && v.type === 'arr') return { type: 'iter', kind: 'arr', arr: v, i: 0 };
+    if (v && v.type === 'obj') {
+      const keys = Object.keys(v.map);
+      return { type: 'iter', kind: 'keys', keys, i: 0 };
+    }
+    panic('value is not iterable');
+  }
+
+  function iterNext(it) {
+    if (!it || it.type !== 'iter') panic('iter_next expects iterator');
+    if (it.kind === 'arr') {
+      if (it.i >= it.arr.items.length) {
+        return { type: 'obj', map: { done: { type: 'bool', value: true }, value: { type: 'undef' } } };
+      }
+      const value = it.arr.items[it.i++];
+      return { type: 'obj', map: { done: { type: 'bool', value: false }, value } };
+    }
+    if (it.kind === 'keys') {
+      if (it.i >= it.keys.length) {
+        return { type: 'obj', map: { done: { type: 'bool', value: true }, value: { type: 'undef' } } };
+      }
+      const value = { type: 'str', value: it.keys[it.i++] };
+      return { type: 'obj', map: { done: { type: 'bool', value: false }, value } };
+    }
+    panic('unknown iterator kind');
+  }
+
   const isPrimitive = v => v.type==='num' || v.type==='bool' || v.type==='str' || v.type==='null' || v.type==='undef';
   const isObjectLike = v => !isPrimitive(v);
   function ensureNum(a) { if (a.type!=='num') panic('Expected number, got ' + a.type); return a.value; }
@@ -222,6 +250,14 @@ export default function createVM(bundle, { onPrint } = {}) {
   // ---- Builtins ----
   const builtins = {
     print: { type:'native', name:'print', arity:1, call:(vm,args)=>{ const s = toStringV(args[0] ?? {type:'null'}); onPrint?.(s); return {type:'null'}; } },
+    keys: { type:'native', name:'keys', arity:1, call:(vm,args)=>{
+      const o = args[0] ?? {type:'null'};
+      if (!o || o.type !== 'obj') panic('keys(...) expects an object');
+      const ks = Object.keys(o.map);
+      return { type:'arr', items: ks.map(k => ({ type:'str', value:k })) };
+    } },
+    iter: { type:'native', name:'iter', arity:1, call:(vm,args)=> iterFrom(args[0] ?? {type:'null'}) },
+    iter_next: { type:'native', name:'iter_next', arity:1, call:(vm,args)=> iterNext(args[0] ?? {type:'null'}) },
   };
 
   function makeClosure(funcIndex, env) { const f = functions[funcIndex]; return { type:'func', name:f.name, funcIndex, env }; }
@@ -354,6 +390,12 @@ export default function createVM(bundle, { onPrint } = {}) {
         switch (instr.op) {
           case 'CONST': { const v = f.consts[instr.a]; stack.push(cloneValue(v)); break; }
           case 'POP': stack.pop(); break;
+
+          case 'IS_ARR': {
+            const v = stack.pop();
+            stack.push({ type: 'bool', value: !!(v && v.type === 'arr') });
+            break;
+          }
           case 'DUP': stack.push(stack[stack.length-1]); break;
 
           case 'BIND_FUNC_NAME': {
