@@ -5,6 +5,7 @@ This is the authoritative opcode list for the current VM.
 Conventions:
 - Stack effects are written as: `(..., a, b) -> (..., result)`
 - `a`/`b` refer to instruction operands (`instr.a`, `instr.b`).
+- Instructions may also carry optional source location `loc` (used for VM error reporting).
 
 ## Stack / constants
 
@@ -86,6 +87,7 @@ Note: `EQ/NE` are type-strict in this implementation (values of different `type`
 
 - `CALL_SUPER_CTOR a`: call superclass constructor with `a` args.
 - `CALL_SUPER_METHOD a b`: call superclass method named `a` with `b` args.
+  - `a` is the method name (string), `b` is the arg count (number).
 
 ## `this`
 

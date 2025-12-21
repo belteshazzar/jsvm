@@ -22,9 +22,9 @@ This VM aims to feel like JavaScript:
 
 - `{ type: 'obj', map: Record<string, Value> }`
   - Objects are created with `Object.create(null)` in the JS VM implementation.
-  - Missing properties currently yield `{type:'null'}`.
+  - Missing properties yield `{type:'undef'}`.
 - `{ type: 'arr', items: Value[] }`
-  - Missing indices currently yield `{type:'null'}`.
+  - Missing indices yield `{type:'undef'}`.
 
 ## Callable values
 

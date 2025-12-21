@@ -37,6 +37,12 @@ Currently encoded as:
 { op: string, a: any | null, b: any | null }
 ```
 
+Note: the current JS compiler/VM also attaches source locations for better errors:
+
+```js
+{ op: string, a: any | null, b: any | null, loc: { line: number, col: number } | null }
+```
+
 Note: for cross-language VMs, you should treat `op` as an enum and `a`/`b` as operands with meanings defined per-opcode (see `OPCODES.md`).
 
 ### `ClassDef`
