@@ -2,6 +2,7 @@
 import { panic } from './common.js';
 
 export default function compile(ast) {
+  const consts = [];
   const functions = [];
   const classes = []; // meta: {name, superName, ctorIndex, methods:[{name, funcIndex}]}
 
@@ -16,15 +17,15 @@ export default function compile(ast) {
   }
 
   function newFunc(name, params) {
-    const fn = { name, params, consts: [], code: [], arity: params.length };
+    const fn = { name, params, code: [], arity: params.length };
     functions.push(fn);
     return fn;
   }
-  function constIndex(fn, v) {
-    const idx = fn.consts.findIndex(x => JSON.stringify(x) === JSON.stringify(v));
+  function constIndex(v) {
+    const idx = consts.findIndex(x => JSON.stringify(x) === JSON.stringify(v));
     if (idx >= 0) return idx;
-    fn.consts.push(v);
-    return fn.consts.length - 1;
+    consts.push(v);
+    return consts.length - 1;
   }
   function emit(fn, op, a=null, b=null) {
     fn.code.push({ op, a, b, loc: currentLoc });
@@ -37,11 +38,11 @@ export default function compile(ast) {
   // Only emit CONST null if the last statement is not an ExprStmt
   const lastStmt = ast.body[ast.body.length - 1];
   if (!lastStmt || lastStmt.type !== 'ExprStmt') {
-    emit(main, 'CONST', constIndex(main, {type:'null'}));
+    emit(main, 'CONST', constIndex({type:'null'}));
   }
   emit(main, 'RET');
 
-  return { bytecodeVersion, functions, classes };
+  return { bytecodeVersion, consts, functions, classes };
 
   function compileBlockLike(fn, stmts) {
     for (let i = 0; i < stmts.length; i++) {
@@ -55,7 +56,7 @@ export default function compile(ast) {
     if (s?.loc) currentLoc = s.loc;
     switch (s.type) {
       case 'VarDecl':
-        if (s.init) compileExpr(fn, s.init); else emit(fn,'CONST',constIndex(fn,{type:'null'}));
+        if (s.init) compileExpr(fn, s.init); else emit(fn,'CONST',constIndex({type:'null'}));
         emit(fn,'DEFINE_NAME',s.name);
         break;
       case 'ConstDecl':
@@ -134,7 +135,7 @@ export default function compile(ast) {
           patch(fn, jumpIndex, fn.code.length);
           if (!discCleaned) {
             // Remove temp from scope by assigning null (no delete op in VM).
-            emit(fn, 'CONST', constIndex(fn, { type: 'null' }));
+            emit(fn, 'CONST', constIndex({ type: 'null' }));
             emit(fn, 'STORE_NAME', discTmp);
             discCleaned = true;
           }
@@ -156,7 +157,7 @@ export default function compile(ast) {
         patch(fn, jNoMatch, defaultStart);
         if (s.defaultCase) {
           if (!discCleaned) {
-            emit(fn, 'CONST', constIndex(fn, { type: 'null' }));
+            emit(fn, 'CONST', constIndex({ type: 'null' }));
             emit(fn, 'STORE_NAME', discTmp);
             discCleaned = true;
           }
@@ -169,7 +170,7 @@ export default function compile(ast) {
           }
         } else {
           if (!discCleaned) {
-            emit(fn, 'CONST', constIndex(fn, { type: 'null' }));
+            emit(fn, 'CONST', constIndex({ type: 'null' }));
             emit(fn, 'STORE_NAME', discTmp);
             discCleaned = true;
           }
@@ -179,13 +180,13 @@ export default function compile(ast) {
         for (const j of switchBreaks) patch(fn, j, end);
         for (const j of endOfBodiesJumps) patch(fn, j, end);
 
-        emit(fn, 'CONST', constIndex(fn, { type: 'null' }));
+        emit(fn, 'CONST', constIndex({ type: 'null' }));
         break;
       }
       case 'FuncDecl': {
         const f = newFunc(s.name, s.params);
         compileBlockLike(f, s.body.body);
-        emit(f,'CONST',constIndex(f,{type:'null'}));
+        emit(f,'CONST',constIndex({type:'null'}));
         emit(f,'RET');
         emit(fn,'MAKE_FUNCTION',functions.indexOf(f));
         emit(fn,'DEFINE_NAME',s.name);
@@ -196,7 +197,7 @@ export default function compile(ast) {
         if (s.ctor) {
           const f = newFunc(`${s.name}.constructor`, s.ctor.params);
           compileBlockLike(f, s.ctor.body.body);
-          emit(f,'CONST',constIndex(f,{type:'null'}));
+          emit(f,'CONST',constIndex({type:'null'}));
           emit(f,'RET');
           ctorIndex = functions.indexOf(f);
         }
@@ -204,7 +205,7 @@ export default function compile(ast) {
         for (const m of s.methods) {
           const f = newFunc(`${s.name}.${m.name}`, m.params);
           compileBlockLike(f, m.body.body);
-          emit(f,'CONST',constIndex(f,{type:'null'}));
+          emit(f,'CONST',constIndex({type:'null'}));
           emit(f,'RET');
           methodEntries.push({ name:m.name, funcIndex:functions.indexOf(f) });
         }
@@ -214,7 +215,7 @@ export default function compile(ast) {
         break;
       }
       case 'Return':
-        if (s.value) compileExpr(fn, s.value); else emit(fn,'CONST',constIndex(fn,{type:'null'}));
+        if (s.value) compileExpr(fn, s.value); else emit(fn,'CONST',constIndex({type:'null'}));
         emit(fn,'RET'); break;
       default: panic('Unknown statement: '+s.type);
     }
@@ -223,17 +224,17 @@ export default function compile(ast) {
   function compileExpr(fn, e) {
     if (e?.loc) currentLoc = e.loc;
     switch (e.type) {
-      case 'Literal': emit(fn,'CONST',constIndex(fn, boxLiteral(e.value))); break;
+      case 'Literal': emit(fn,'CONST',constIndex(boxLiteral(e.value))); break;
       case 'TemplateLiteral': {
         // Lower to left-to-right string concatenation.
         // quasis length is expressions length + 1 (allow empty chunks).
         const first = String(e.quasis?.[0] ?? '');
-        emit(fn,'CONST',constIndex(fn, { type: 'str', value: first }));
+        emit(fn,'CONST',constIndex({ type: 'str', value: first }));
         for (let i = 0; i < e.expressions.length; i++) {
           compileExpr(fn, e.expressions[i]);
           emit(fn, 'ADD');
           const tail = String(e.quasis?.[i + 1] ?? '');
-          emit(fn,'CONST',constIndex(fn, { type: 'str', value: tail }));
+          emit(fn,'CONST',constIndex({ type: 'str', value: tail }));
           emit(fn, 'ADD');
         }
         break;
@@ -361,7 +362,7 @@ export default function compile(ast) {
         const internalName = e.name != null ? String(e.name) : '<anonymous>';
         const f = newFunc(internalName, e.params);
         compileBlockLike(f, e.body.body);
-        emit(f, 'CONST', constIndex(f, { type: 'null' }));
+        emit(f, 'CONST', constIndex({ type: 'null' }));
         emit(f, 'RET');
         emit(fn, 'MAKE_FUNCTION', functions.indexOf(f));
         if (e.name != null) {
@@ -379,7 +380,7 @@ export default function compile(ast) {
           emit(f, 'RET');
         } else {
           compileBlockLike(f, e.body.body);
-          emit(f, 'CONST', constIndex(f, { type: 'null' }));
+          emit(f, 'CONST', constIndex({ type: 'null' }));
           emit(f, 'RET');
         }
         emit(fn, 'MAKE_FUNCTION', functions.indexOf(f));

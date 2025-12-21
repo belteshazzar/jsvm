@@ -2,7 +2,7 @@
 
 import fs from 'node:fs/promises';
 
-import { run, compile, runBundle } from '../main.js';
+import { run, compileBinary, runBundleBuffer } from '../main.js';
 
 function printHelp(exitCode = 0) {
   const msg = `Usage: jsvm [options]
@@ -95,8 +95,8 @@ async function main() {
   const { filePath, emitBytecodePath, runBytecodePath } = parseArgs(process.argv);
 
   if (runBytecodePath) {
-    const json = await fs.readFile(runBytecodePath, 'utf8');
-    runBundle(json, {
+    const buf = await fs.readFile(runBytecodePath);
+    runBundleBuffer(buf, {
       onPrint: s => process.stdout.write(String(s) + '\n'),
     });
     return;
@@ -112,8 +112,8 @@ async function main() {
   }
 
   if (emitBytecodePath) {
-    const bundle = compile(src);
-    await fs.writeFile(emitBytecodePath, JSON.stringify(bundle, null, 2), 'utf8');
+    const buf = compileBinary(src);
+    await fs.writeFile(emitBytecodePath, buf);
     return;
   }
 

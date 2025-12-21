@@ -17,7 +17,7 @@ function runCli(args, stdin = null) {
 test('cli: emit bytecode then run bytecode', async () => {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'jsvm-cli-bc-'));
   const srcPath = path.join(tmpDir, 'prog.js');
-  const bcPath = path.join(tmpDir, 'prog.bc.json');
+  const bcPath = path.join(tmpDir, 'prog.bcb');
 
   await fs.writeFile(srcPath, "print('hello');\n", 'utf8');
 

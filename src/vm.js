@@ -13,6 +13,29 @@ export default function createVM(bundle, { onPrint } = {}) {
     panic(`Unsupported bytecodeVersion ${String(got)} (expected 1)`);
   }
   const { functions, classes } = bundle;
+  const consts = bundle?.consts;
+  if (!Array.isArray(consts)) panic('Malformed bytecode bundle: missing global consts');
+
+  // ---- Builtins ----
+  const builtins = {
+    print: { type:'native', name:'print', arity:1, call:(vm,args)=>{ const s = toStringV(args[0] ?? {type:'null'}); onPrint?.(s); return {type:'null'}; } },
+  };
+
+  function hydrateConst(v) {
+    if (!v) return v;
+    if (v.type === 'func') {
+      // Recreate a closure with the current globals as its environment.
+      // This matches how top-level function values behave in this VM.
+      return makeClosure(v.funcIndex, globals);
+    }
+    if (v.type === 'native') {
+      // Rehydrate native constants by name.
+      const n = builtins[v.name];
+      if (!n) panic('Unknown native in const pool: ' + String(v.name));
+      return n;
+    }
+    return v;
+  }
 
   function isTruthy(v) {
     switch (v.type) {
@@ -219,11 +242,6 @@ export default function createVM(bundle, { onPrint } = {}) {
     }};
   }
 
-  // ---- Builtins ----
-  const builtins = {
-    print: { type:'native', name:'print', arity:1, call:(vm,args)=>{ const s = toStringV(args[0] ?? {type:'null'}); onPrint?.(s); return {type:'null'}; } },
-  };
-
   function makeClosure(funcIndex, env) { const f = functions[funcIndex]; return { type:'func', name:f.name, funcIndex, env }; }
 
   const homeProtoByFuncIndex = Object.create(null);
@@ -352,7 +370,12 @@ export default function createVM(bundle, { onPrint } = {}) {
         });
 
         switch (instr.op) {
-          case 'CONST': { const v = f.consts[instr.a]; stack.push(cloneValue(v)); break; }
+          case 'CONST': {
+            const v = hydrateConst(consts[instr.a]);
+            if (!v) panic('Invalid const pool index: ' + String(instr.a));
+            stack.push(cloneValue(v));
+            break;
+          }
           case 'POP': stack.pop(); break;
           case 'DUP': stack.push(stack[stack.length-1]); break;
 

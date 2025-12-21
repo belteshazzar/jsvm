@@ -3,6 +3,7 @@ import lex from "./src/lexer.js";
 import parse from "./src/parser.js";
 import compileAst from "./src/compiler.js";
 import createVM from "./src/vm.js";
+import { decodeBundle, encodeBundle } from "./src/bytecode/io.js";
 
 export function compile(src) {
   const toks = lex(src);
@@ -17,6 +18,16 @@ export function runBundle(bundleOrJson, options = { onPrint: s => {} }) {
     onPrint: s => options.onPrint(s),
   });
   return vm.runMain();
+}
+
+export function compileBinary(src) {
+  const bundle = compile(src);
+  return encodeBundle(bundle);
+}
+
+export function runBundleBuffer(buf, options = { onPrint: s => {} }) {
+  const bundle = decodeBundle(buf);
+  return runBundle(bundle, options);
 }
 
 export function run(src, options = {
