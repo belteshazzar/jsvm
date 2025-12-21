@@ -48,7 +48,7 @@ Non-goals (intentionally omitted from the subset):
 - [x] `for..in` loop over property keys
 - [x] `for..of` loop over property values
 - [x] `break` / `continue`
-- [ ] `switch` (optional)
+- [x] `switch`
 
 ### Test coverage
 - [ ] Short-circuit tests for `&&`/`||` with side effects
@@ -60,7 +60,7 @@ Non-goals (intentionally omitted from the subset):
 ## Phase C — Curated standard library
 
 ### Builtins (curated, sandbox-only operations)
-- [ ] `Math` (pure numeric functions only)
+- [x] `Math` (pure numeric functions only)
 - [ ] `JSON.parse` / `JSON.stringify` (sandbox-value encoding only)
 - [ ] String methods (curated): `slice`, `includes`, `indexOf`, `toUpperCase`, …
 - [ ] Array method expansions (only those that cannot escape via callbacks, or add callback support with a careful design)

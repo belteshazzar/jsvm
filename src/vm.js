@@ -17,8 +17,83 @@ export default function createVM(bundle, { onPrint } = {}) {
   if (!Array.isArray(consts)) panic('Malformed bytecode bundle: missing global consts');
 
   // ---- Builtins ----
+  // --- Builtins ---
+  const mathFuncs = [
+    // [name, arity, fn]
+    ['abs', 1, Math.abs],
+    ['acos', 1, Math.acos],
+    ['acosh', 1, Math.acosh],
+    ['asin', 1, Math.asin],
+    ['asinh', 1, Math.asinh],
+    ['atan', 1, Math.atan],
+    ['atan2', 2, Math.atan2],
+    ['atanh', 1, Math.atanh],
+    ['cbrt', 1, Math.cbrt],
+    ['ceil', 1, Math.ceil],
+    ['clz32', 1, Math.clz32],
+    ['cos', 1, Math.cos],
+    ['cosh', 1, Math.cosh],
+    ['exp', 1, Math.exp],
+    ['expm1', 1, Math.expm1],
+    ['floor', 1, Math.floor],
+    ['fround', 1, Math.fround],
+    ['hypot', null, Math.hypot],
+    ['imul', 2, Math.imul],
+    ['log', 1, Math.log],
+    ['log10', 1, Math.log10],
+    ['log1p', 1, Math.log1p],
+    ['log2', 1, Math.log2],
+    ['max', null, Math.max],
+    ['min', null, Math.min],
+    ['pow', 2, Math.pow],
+    ['random', 0, Math.random],
+    ['round', 1, Math.round],
+    ['sign', 1, Math.sign],
+    ['sin', 1, Math.sin],
+    ['sinh', 1, Math.sinh],
+    ['sqrt', 1, Math.sqrt],
+    ['tan', 1, Math.tan],
+    ['tanh', 1, Math.tanh],
+    ['trunc', 1, Math.trunc],
+  ];
+
+  const mathConsts = [
+    ['E', Math.E],
+    ['LN10', Math.LN10],
+    ['LN2', Math.LN2],
+    ['LOG10E', Math.LOG10E],
+    ['LOG2E', Math.LOG2E],
+    ['PI', Math.PI],
+    ['SQRT1_2', Math.SQRT1_2],
+    ['SQRT2', Math.SQRT2],
+  ];
+
+  const MathObj = { type: 'obj', map: Object.create(null) };
+  for (const [name, arity, fn] of mathFuncs) {
+    MathObj.map[name] = {
+      type: 'native',
+      name: 'Math.' + name,
+      arity,
+      call: (vm, args) => {
+        // Convert boxed args to JS numbers, handle arity=null (variadic)
+        const jsArgs = Array.isArray(args) ? args.map(a => a && a.type === 'num' ? a.value : NaN) : [];
+        let result;
+        try {
+          result = arity === null ? fn(...jsArgs) : fn(...jsArgs.slice(0, arity));
+        } catch (e) {
+          result = NaN;
+        }
+        return { type: 'num', value: result };
+      }
+    };
+  }
+  for (const [name, value] of mathConsts) {
+    MathObj.map[name] = { type: 'num', value };
+  }
+
   const builtins = {
     print: { type:'native', name:'print', arity:1, call:(vm,args)=>{ const s = toStringV(args[0] ?? {type:'null'}); onPrint?.(s); return {type:'null'}; } },
+    Math: MathObj,
   };
 
   function hydrateConst(v) {
