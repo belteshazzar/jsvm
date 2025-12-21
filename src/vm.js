@@ -243,6 +243,9 @@ export default function createVM(bundle, { onPrint } = {}) {
     const f = functions[funcValue.funcIndex];
     const env = Env(funcValue.env);
     for (let i=0;i<f.params.length;i++) envDefine(env, f.params[i], args[i] ?? {type:'null'});
+    if (funcValue.bindName) {
+      envDefineConst(env, funcValue.bindName, funcValue);
+    }
     callstack.push({ funcIndex: funcValue.funcIndex, ip:0, env, thisObj, isCtor: !!flags.isCtor, isDerived: !!flags.isDerived, superCalled: !!flags.superCalled });
   }
   function popFrame(){ return callstack.pop(); }
@@ -351,6 +354,13 @@ export default function createVM(bundle, { onPrint } = {}) {
           case 'CONST': { const v = f.consts[instr.a]; stack.push(cloneValue(v)); break; }
           case 'POP': stack.pop(); break;
           case 'DUP': stack.push(stack[stack.length-1]); break;
+
+          case 'BIND_FUNC_NAME': {
+            const v = stack[stack.length - 1];
+            if (!v || v.type !== 'func') panic('BIND_FUNC_NAME on non-function');
+            v.bindName = String(instr.a);
+            break;
+          }
 
           case 'LOAD_NAME': stack.push(envGet(frame.env, instr.a)); break;
           case 'STORE_NAME': { const val = stack[stack.length-1]; envSet(frame.env, instr.a, val); break; }

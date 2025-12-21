@@ -77,6 +77,10 @@ Note: `EQ/NE` are type-strict in this implementation (values of different `type`
 ## Functions / calls
 
 - `MAKE_FUNCTION a`: create closure from `functions[a]` capturing current env.
+- `BIND_FUNC_NAME a`: annotate the function value on top of the stack with an internal name binding.
+  - Semantics: expects stack top to be a `func` value; sets `func.bindName = a`.
+  - Stack: `(..., fn) -> (..., fn)`
+  - Runtime effect: when the function is later called, the VM defines `const <a> = <fn>` in the function's call environment, making named function expressions self-referential (supports recursion) without defining `<a>` in the outer scope.
 - `CALL a`: call with `a` args.
 - `CALL_PROP a`: call recv[prop] with `a` args (binds `this` to recv).
 - `CALL_ELEM a`: call recv[key] with `a` args (binds `this` to recv).

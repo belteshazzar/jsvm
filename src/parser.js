@@ -327,6 +327,20 @@ export default function parse(tokens) {
     if (at('IDENT') && peek().value === 'undefined') { const t = next(); return { type:'Literal', value: undefined, loc: locFrom(t) }; }
     if (at('THIS')) { const t = next(); return { type:'This', loc: locFrom(t) }; }
     if (at('SUPER')) { const t = next(); return { type:'Super', loc: locFrom(t) }; }
+    if (at('FUNCTION')) {
+      const start = next();
+      let name = null;
+      if (at('IDENT')) name = next().value;
+      expect('LPAREN', "Expected '('");
+      const params = [];
+      if (!at('RPAREN')) {
+        do { params.push(expect('IDENT', 'Expected parameter name').value); }
+        while (at('COMMA') && next());
+      }
+      expect('RPAREN', "Expected ')'");
+      const body = block();
+      return { type:'FuncExpr', name, params, body, loc: locFrom(start) };
+    }
     if (at('IDENT')) { const t = next(); return { type:'Identifier', name: t.value, loc: locFrom(t) }; }
     if (match('TEMPLATE_START')) {
       const startTok = prev();

@@ -42,7 +42,7 @@ Non-goals (intentionally omitted from the subset):
 ## Phase B — Control flow & functions
 
 ### Language features
-- [ ] Function expressions
+- [x] Function expressions
 - [ ] Arrow functions (no `this` binding; closure-only)
 - [ ] `for (init; cond; post)` loop (compile to while)
 - [ ] `break` / `continue`

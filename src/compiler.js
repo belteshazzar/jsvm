@@ -270,14 +270,23 @@ export default function compile(ast) {
           panic('Unknown OptChain type: ' + e.chainType);
         }
         break;
-        emit(fn,'MAKE_ARR');
-        for (const el of e.elements) {
-          emit(fn,'DUP');
-          compileExpr(fn, el);
-          emit(fn,'APPEND_ELEM');
-          emit(fn,'POP');
+
+      case 'FuncExpr': {
+        // Function expressions create closures. Named function expressions bind
+        // the name only within the function body (not in the outer scope).
+        const internalName = e.name != null ? String(e.name) : '<anonymous>';
+        const f = newFunc(internalName, e.params);
+        compileBlockLike(f, e.body.body);
+        emit(f, 'CONST', constIndex(f, { type: 'null' }));
+        emit(f, 'RET');
+        emit(fn, 'MAKE_FUNCTION', functions.indexOf(f));
+        if (e.name != null) {
+          // Tag the closure so the VM binds it as a const in the callee env.
+          // Stack top is the closure value; we just annotate it via a new opcode.
+          emit(fn, 'BIND_FUNC_NAME', e.name);
         }
         break;
+      }
       case 'Member':
         compileExpr(fn, e.object);
         compileExpr(fn, e.property);
