@@ -21,6 +21,9 @@ Conventions:
 - `STORE_NAME a`: assign to existing variable (does not pop).
 - `DEFINE_NAME a`: define variable in current env, consuming value.
   - Stack: `(..., v) -> (...)`
+- `DEFINE_CONST a`: define constant binding in current env, consuming value.
+  - Stack: `(..., v) -> (...)`
+  - Reassignment via `STORE_NAME a` must throw.
 
 ### Scopes (block scoping)
 

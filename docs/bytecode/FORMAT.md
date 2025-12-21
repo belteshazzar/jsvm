@@ -8,6 +8,7 @@ A compiled program is a JSON-serializable object:
 
 ```js
 {
+  bytecodeVersion: 1,
   functions: FunctionDef[],
   classes: ClassDef[]
 }
@@ -53,6 +54,6 @@ Note: for cross-language VMs, you should treat `op` as an enum and `a`/`b` as op
 
 ## Versioning
 
-The current repo does not yet embed an explicit `bytecodeVersion` field.
-
-Planned: add `bytecodeVersion: 1` at the top-level bundle and enforce it in the VM loader so alternative implementations can reject incompatible formats deterministically.
+- `bytecodeVersion` is a required integer.
+- Current version: `1`.
+- VMs must reject unknown versions.

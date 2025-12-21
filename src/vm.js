@@ -8,6 +8,10 @@ function formatInstr(f, instr, ip) {
 }
 
 export default function createVM(bundle, { onPrint } = {}) {
+  if (bundle?.bytecodeVersion !== 1) {
+    const got = bundle?.bytecodeVersion;
+    panic(`Unsupported bytecodeVersion ${String(got)} (expected 1)`);
+  }
   const { functions, classes } = bundle;
 
   function isTruthy(v) { return !(v.type === 'bool' && v.value === false) && v.type !== 'null' && v.type !== 'undef'; }
@@ -55,16 +59,27 @@ export default function createVM(bundle, { onPrint } = {}) {
   }
 
   // ---- Environments (lexical) ----
-  function Env(parent = null) { return { map: Object.create(null), parent }; }
+  function Env(parent = null) { return { map: Object.create(null), consts: Object.create(null), parent }; }
   function envGet(env, name) {
     for (let e = env; e; e = e.parent) { if (name in e.map) return e.map[name]; }
     panic(`Undefined variable '${name}'`);
   }
   function envSet(env, name, value) {
-    for (let e = env; e; e = e.parent) { if (name in e.map) { e.map[name] = value; return value; } }
+    for (let e = env; e; e = e.parent) {
+      if (name in e.map) {
+        if (e.consts[name]) panic(`Assignment to constant variable '${name}'`);
+        e.map[name] = value;
+        return value;
+      }
+    }
     panic(`Undefined variable '${name}'`);
   }
   function envDefine(env, name, value) { env.map[name] = value; return value; }
+  function envDefineConst(env, name, value) {
+    env.map[name] = value;
+    env.consts[name] = true;
+    return value;
+  }
 
   function binaryMath(op) {
     const b=stack.pop(), a=stack.pop();
@@ -322,6 +337,7 @@ export default function createVM(bundle, { onPrint } = {}) {
           case 'LOAD_NAME': stack.push(envGet(frame.env, instr.a)); break;
           case 'STORE_NAME': { const val = stack[stack.length-1]; envSet(frame.env, instr.a, val); break; }
           case 'DEFINE_NAME': { const val = stack.pop(); envDefine(frame.env, instr.a, val); break; }
+          case 'DEFINE_CONST': { const val = stack.pop(); envDefineConst(frame.env, instr.a, val); break; }
 
           case 'SCOPE_PUSH': scopePush(frame); break;
           case 'SCOPE_POP': scopePop(frame); break;

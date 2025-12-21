@@ -5,6 +5,8 @@ export default function compile(ast) {
   const functions = [];
   const classes = []; // meta: {name, superName, ctorIndex, methods:[{name, funcIndex}]}
 
+  const bytecodeVersion = 1;
+
   function newFunc(name, params) {
     const fn = { name, params, consts: [], code: [], arity: params.length };
     functions.push(fn);
@@ -27,7 +29,7 @@ export default function compile(ast) {
   emit(main, 'CONST', constIndex(main, {type:'null'}));
   emit(main, 'RET');
 
-  return { functions, classes };
+  return { bytecodeVersion, functions, classes };
 
   function compileBlockLike(fn, stmts) { for (const s of stmts) compileStmt(fn, s); }
 
@@ -36,6 +38,10 @@ export default function compile(ast) {
       case 'VarDecl':
         if (s.init) compileExpr(fn, s.init); else emit(fn,'CONST',constIndex(fn,{type:'null'}));
         emit(fn,'DEFINE_NAME',s.name);
+        break;
+      case 'ConstDecl':
+        compileExpr(fn, s.init);
+        emit(fn, 'DEFINE_CONST', s.name);
         break;
       case 'ExprStmt':
         compileExpr(fn, s.expr); emit(fn,'POP'); break;

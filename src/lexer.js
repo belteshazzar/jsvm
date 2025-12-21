@@ -39,7 +39,7 @@ export default function tokenize(input) {
   }
 
   const keywords = new Set([
-    'let','if','else','while','function','return','true','false','null',
+    'let','const','if','else','while','function','return','true','false','null',
     'class','new','this','extends','super'
   ]);
 

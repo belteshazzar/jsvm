@@ -27,6 +27,7 @@ export default function parse(tokens) {
 
   function stmt() {
     if (at('LET')) return varDecl();
+    if (at('CONST')) return constDecl();
     if (at('IF')) return ifStmt();
     if (at('WHILE')) return whileStmt();
     if (at('FUNCTION')) return funcDecl();
@@ -36,6 +37,15 @@ export default function parse(tokens) {
     const e = expr();
     expect('SEMI', "Expected ';' after expression");
     return { type:'ExprStmt', expr:e };
+  }
+
+  function constDecl() {
+    next(); // CONST
+    const nameTok = expect('IDENT', 'Expected constant name');
+    expect('EQUAL', "Expected '=' after const name");
+    const init = expr();
+    expect('SEMI', "Expected ';' after const declaration");
+    return { type: 'ConstDecl', name: nameTok.value, init };
   }
 
   function varDecl() {
