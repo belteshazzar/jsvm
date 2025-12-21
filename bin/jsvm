@@ -2,7 +2,7 @@
 
 import fs from 'node:fs/promises';
 
-import { run } from '../main.js';
+import { run, compile, runBundle } from '../main.js';
 
 function printHelp(exitCode = 0) {
   const msg = `Usage: jsvm [options]
@@ -11,11 +11,17 @@ Runs jsvm (safe JS subset) from stdin or a file.
 
 Options:
   -f, --file <path>   Read program from file
+  --emit-bytecode <path>
+                     Compile program and write bytecode bundle JSON
+  --run-bytecode <path>
+                     Execute a previously saved bytecode bundle JSON
   -h, --help          Show this help
 
 Examples:
   echo 'print(1+2);' | jsvm
   jsvm --file ./prog.js
+  jsvm --file ./prog.js --emit-bytecode ./prog.bc.json
+  jsvm --run-bytecode ./prog.bc.json
 `;
   (exitCode === 0 ? process.stdout : process.stderr).write(msg);
   process.exit(exitCode);
@@ -24,6 +30,8 @@ Examples:
 function parseArgs(argv) {
   const args = argv.slice(2);
   let filePath = null;
+  let emitBytecodePath = null;
+  let runBytecodePath = null;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -39,11 +47,38 @@ function parseArgs(argv) {
       continue;
     }
 
+    if (a === '--emit-bytecode') {
+      const p = args[i + 1];
+      if (!p) {
+        process.stderr.write('Missing value for --emit-bytecode\n');
+        printHelp(2);
+      }
+      emitBytecodePath = p;
+      i++;
+      continue;
+    }
+
+    if (a === '--run-bytecode') {
+      const p = args[i + 1];
+      if (!p) {
+        process.stderr.write('Missing value for --run-bytecode\n');
+        printHelp(2);
+      }
+      runBytecodePath = p;
+      i++;
+      continue;
+    }
+
     process.stderr.write(`Unknown argument: ${a}\n`);
     printHelp(2);
   }
 
-  return { filePath };
+  if (emitBytecodePath && runBytecodePath) {
+    process.stderr.write('Cannot use --emit-bytecode and --run-bytecode together\n');
+    printHelp(2);
+  }
+
+  return { filePath, emitBytecodePath, runBytecodePath };
 }
 
 async function readStdin() {
@@ -57,7 +92,15 @@ async function readStdin() {
 }
 
 async function main() {
-  const { filePath } = parseArgs(process.argv);
+  const { filePath, emitBytecodePath, runBytecodePath } = parseArgs(process.argv);
+
+  if (runBytecodePath) {
+    const json = await fs.readFile(runBytecodePath, 'utf8');
+    runBundle(json, {
+      onPrint: s => process.stdout.write(String(s) + '\n'),
+    });
+    return;
+  }
 
   let src;
   if (filePath) {
@@ -66,6 +109,12 @@ async function main() {
     // If nothing is piped, stdin will be a TTY. In that case, show help.
     if (process.stdin.isTTY) printHelp(2);
     src = await readStdin();
+  }
+
+  if (emitBytecodePath) {
+    const bundle = compile(src);
+    await fs.writeFile(emitBytecodePath, JSON.stringify(bundle, null, 2), 'utf8');
+    return;
   }
 
   run(src, {
