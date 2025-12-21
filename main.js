@@ -4,6 +4,7 @@ import parse from "./src/parser.js";
 import compileAst from "./src/compiler.js";
 import createVM from "./src/vm.js";
 import { decodeBundle, encodeBundle } from "./src/bytecode/io.js";
+import { createDefaultEnv } from "./src/env.js";
 
 export function compile(src) {
   const toks = lex(src);
@@ -14,9 +15,8 @@ export function compile(src) {
 export function runBundle(bundleOrJson, options = { onPrint: s => {} }) {
   const bundle =
     typeof bundleOrJson === 'string' ? JSON.parse(bundleOrJson) : bundleOrJson;
-  const vm = createVM(bundle, {
-    onPrint: s => options.onPrint(s),
-  });
+  const env = createDefaultEnv({ onPrint: s => options.onPrint(s) });
+  const vm = createVM(bundle, { env });
   return vm.runMain();
 }
 
