@@ -1,4 +1,5 @@
 
+import { panic } from './common.js';
 
 export default function compile(ast) {
   const functions = [];
@@ -39,7 +40,10 @@ export default function compile(ast) {
       case 'ExprStmt':
         compileExpr(fn, s.expr); emit(fn,'POP'); break;
       case 'Block':
-        for (const inner of s.body) compileStmt(fn, inner); break;
+        emit(fn, 'SCOPE_PUSH');
+        for (const inner of s.body) compileStmt(fn, inner);
+        emit(fn, 'SCOPE_POP');
+        break;
       case 'If':
         compileExpr(fn, s.cond);
         const jf = emit(fn,'JMP_IF_FALSE',null);

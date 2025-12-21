@@ -1,4 +1,5 @@
 
+import { panic } from './common.js';
 
 const isAlpha = c => /[A-Za-z_]/.test(c);
 const isDigit = c => /[0-9]/.test(c);

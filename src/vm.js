@@ -1,6 +1,6 @@
 
+import { setLastInstr, panic } from './common.js';
 
-let lastInstr = null;
 function formatInstr(f, instr, ip) {
   const a = instr.a == null ? '' : ' ' + String(instr.a);
   const b = instr.b == null ? '' : ' ' + String(instr.b);
@@ -217,6 +217,14 @@ export default function createVM(bundle, { onPrint } = {}) {
   }
   function popFrame(){ return callstack.pop(); }
 
+  function scopePush(frame) {
+    frame.env = Env(frame.env);
+  }
+  function scopePop(frame) {
+    if (!frame.env?.parent) panic('SCOPE_POP without parent env');
+    frame.env = frame.env.parent;
+  }
+
   function makeClass(classIndex, env) {
     const meta = classes[classIndex];
     let superClass = null;
@@ -304,7 +312,7 @@ export default function createVM(bundle, { onPrint } = {}) {
         const f = functions[frame.funcIndex];
         const instr = f.code[frame.ip++];
         if (!instr) { stack.push({type:'null'}); popFrame(); continue; }
-        lastInstr = formatInstr(f, instr, frame.ip-1);
+        setLastInstr(formatInstr(f, instr, frame.ip-1));
 
         switch (instr.op) {
           case 'CONST': { const v = f.consts[instr.a]; stack.push(cloneValue(v)); break; }
@@ -314,6 +322,9 @@ export default function createVM(bundle, { onPrint } = {}) {
           case 'LOAD_NAME': stack.push(envGet(frame.env, instr.a)); break;
           case 'STORE_NAME': { const val = stack[stack.length-1]; envSet(frame.env, instr.a, val); break; }
           case 'DEFINE_NAME': { const val = stack.pop(); envDefine(frame.env, instr.a, val); break; }
+
+          case 'SCOPE_PUSH': scopePush(frame); break;
+          case 'SCOPE_POP': scopePop(frame); break;
 
           case 'LOAD_THIS': {
             if (frame.isCtor && frame.isDerived && !frame.superCalled) panic("Cannot access 'this' before calling super()");

@@ -1,4 +1,6 @@
 
+import { panic } from './common.js';
+
 export default function parse(tokens) {
   let i = 0;
   function peek() { return tokens[i]; }
