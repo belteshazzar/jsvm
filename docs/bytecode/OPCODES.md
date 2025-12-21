@@ -1,3 +1,7 @@
+## Nullish coalescing
+
+- `NULLISH_COALESCE`: pop right and left, push left if not null/undef, else right.
+  - Stack: `(..., left, right) -> (..., result)`
 # Opcodes
 
 This is the authoritative opcode list for the current VM.

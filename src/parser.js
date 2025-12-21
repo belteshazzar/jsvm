@@ -150,8 +150,18 @@ export default function parse(tokens) {
     return left;
   }
 
+  function nullish() {
+    let left = logicOr();
+    while (at('DOUBLE_QMARK')) {
+      const t = next();
+      const right = logicOr();
+      left = { type: 'NullishCoalesce', left, right, loc: locFrom(t) };
+    }
+    return left;
+  }
+
   function conditional() {
-    const test = logicOr();
+    const test = nullish();
     if (!at('QMARK')) return test;
     const qm = next(); // ?
     const consequent = assignment();

@@ -14,7 +14,18 @@ export default function createVM(bundle, { onPrint } = {}) {
   }
   const { functions, classes } = bundle;
 
-  function isTruthy(v) { return !(v.type === 'bool' && v.value === false) && v.type !== 'null' && v.type !== 'undef'; }
+  function isTruthy(v) {
+    switch (v.type) {
+      case 'bool': return v.value === true;
+      case 'num': return v.value !== 0 && !Number.isNaN(v.value);
+      case 'str': return v.value.length > 0;
+      case 'null':
+      case 'undef':
+        return false;
+      default:
+        return true;
+    }
+  }
   function toStringV(v) {
     switch (v.type) {
       case 'num': return String(v.value);
@@ -494,6 +505,26 @@ export default function createVM(bundle, { onPrint } = {}) {
             break;
           }
 
+          case 'NULLISH_COALESCE': {
+            const right = stack.pop();
+            const left = stack.pop();
+            // DEBUG: print left/right
+            if (typeof process !== 'undefined' && process.env && process.env.DEBUG_JSVM_NULLISH) {
+              process.stderr.write(`[NULLISH] left=${JSON.stringify(left)} right=${JSON.stringify(right)}\n`);
+            }
+            if (left.type === 'null' || left.type === 'undef') {
+              if (typeof process !== 'undefined' && process.env && process.env.DEBUG_JSVM_NULLISH) {
+                process.stderr.write(`[NULLISH] push right: ${JSON.stringify(right)}\n`);
+              }
+              stack.push(right);
+            } else {
+              if (typeof process !== 'undefined' && process.env && process.env.DEBUG_JSVM_NULLISH) {
+                process.stderr.write(`[NULLISH] push left: ${JSON.stringify(left)}\n`);
+              }
+              stack.push(left);
+            }
+            break;
+          }
           default: panic('Unknown opcode: ' + instr.op);
         }
       }

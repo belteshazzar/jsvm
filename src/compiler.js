@@ -34,18 +34,24 @@ export default function compile(ast) {
 
   const main = newFunc('(main)', []);
   compileBlockLike(main, ast.body);
-  emit(main, 'CONST', constIndex(main, {type:'null'}));
+  // Only emit CONST null if the last statement is not an ExprStmt
+  const lastStmt = ast.body[ast.body.length - 1];
+  if (!lastStmt || lastStmt.type !== 'ExprStmt') {
+    emit(main, 'CONST', constIndex(main, {type:'null'}));
+  }
   emit(main, 'RET');
 
   return { bytecodeVersion, functions, classes };
 
   function compileBlockLike(fn, stmts) {
-    for (const s of stmts) {
-      withLoc(s.loc, () => compileStmt(fn, s));
+    for (let i = 0; i < stmts.length; i++) {
+      const s = stmts[i];
+      const isLast = i === stmts.length - 1;
+      withLoc(s.loc, () => compileStmt(fn, s, isLast));
     }
   }
 
-  function compileStmt(fn, s) {
+  function compileStmt(fn, s, isLast = false) {
     if (s?.loc) currentLoc = s.loc;
     switch (s.type) {
       case 'VarDecl':
@@ -57,7 +63,9 @@ export default function compile(ast) {
         emit(fn, 'DEFINE_CONST', s.name);
         break;
       case 'ExprStmt':
-        compileExpr(fn, s.expr); emit(fn,'POP'); break;
+        compileExpr(fn, s.expr);
+        if (!isLast) emit(fn,'POP');
+        break;
       case 'Block':
         emit(fn, 'SCOPE_PUSH');
         for (const inner of s.body) compileStmt(fn, inner);
@@ -195,6 +203,11 @@ export default function compile(ast) {
         patch(fn, jend, fn.code.length);
         break;
       }
+      case 'NullishCoalesce':
+        compileExpr(fn, e.left);
+        compileExpr(fn, e.right);
+        emit(fn, 'NULLISH_COALESCE');
+        break;
       case 'Call':
         if (e.callee.type==='Member') {
           if (e.callee.computed) {

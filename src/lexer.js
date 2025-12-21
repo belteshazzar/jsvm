@@ -144,8 +144,13 @@ export default function tokenize(input) {
     const threeOps = ['===','!=='];
     if (threeOps.includes(three)) { next(); next(); next(); add(three); continue; }
 
-    const twoOps = ['==','!=','<=','>=','&&','||'];
-    if (twoOps.includes(two)) { next(); next(); add(two); continue; }
+    const twoOps = ['==','!=','<=','>=','&&','||','??'];
+    if (twoOps.includes(two)) {
+      next(); next();
+      if (two === '??') add('DOUBLE_QMARK');
+      else add(two);
+      continue;
+    }
 
     const single = {
       '+':'PLUS', '-':'MINUS', '*':'STAR', '/':'SLASH', '%':'PERCENT',
