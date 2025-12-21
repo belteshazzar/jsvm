@@ -67,6 +67,9 @@ Non-goals (intentionally omitted from the subset):
 - [ ] Explicit denylist tests: ensure `eval`, `Function`, `globalThis`, `process` cannot be referenced
 - [ ] Confirm `Object.create(null)` is preserved for VM objects (no prototype pollution)
 
+### Import (from allowed list)
+- [ ] `import` for known packages that are whitelisted in the VM
+
 ---
 
 ## Bytecode stability (lockstep with implementation)
