@@ -130,7 +130,7 @@ export default function parse(tokens) {
   function expr() { return assignment(); }
 
   function assignment() {
-    const left = logicOr();
+    const left = conditional();
     if (at('EQUAL')) {
       const eq = next();
       const right = assignment();
@@ -139,6 +139,16 @@ export default function parse(tokens) {
       panic("Invalid assignment target", eq);
     }
     return left;
+  }
+
+  function conditional() {
+    const test = logicOr();
+    if (!at('QMARK')) return test;
+    next(); // ?
+    const consequent = assignment();
+    expect('COLON', "Expected ':' in conditional expression");
+    const alternate = assignment();
+    return { type: 'Conditional', test, consequent, alternate };
   }
 
   function logicOr() {

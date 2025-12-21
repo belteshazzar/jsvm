@@ -155,6 +155,18 @@ export default function compile(ast) {
           patch(fn, jf, fn.code.length);
         }
         break;
+      case 'Conditional': {
+        compileExpr(fn, e.test);
+        const jf = emit(fn, 'JMP_IF_FALSE', null);
+        emit(fn, 'POP');
+        compileExpr(fn, e.consequent);
+        const jend = emit(fn, 'JMP', null);
+        patch(fn, jf, fn.code.length);
+        emit(fn, 'POP');
+        compileExpr(fn, e.alternate);
+        patch(fn, jend, fn.code.length);
+        break;
+      }
       case 'Call':
         if (e.callee.type==='Member') {
           if (e.callee.computed) {

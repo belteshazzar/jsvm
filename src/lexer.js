@@ -100,6 +100,7 @@ export default function tokenize(input) {
       '(':'LPAREN', ')':'RPAREN', '{':'LBRACE', '}':'RBRACE',
       '[':'LBRACK', ']':'RBRACK',
       ';':'SEMI', ',':'COMMA', ':' : 'COLON', '.' : 'DOT',
+      '?':'QMARK',
       '=':'EQUAL', '<':'LT', '>':'GT', '!':'BANG'
     };
     if (single[c]) { next(); add(single[c]); continue; }

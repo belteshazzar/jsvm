@@ -23,7 +23,7 @@ Non-goals (intentionally omitted from the subset):
 - [x] `const` declarations and const-assignment errors
 - [x] `undefined` literal + JS-like `null` vs `undefined` semantics for “missing”
 - [x] Strict equality: `===` and `!==`
-- [ ] Ternary operator: `cond ? a : b`
+- [x] Ternary operator: `cond ? a : b`
 - [ ] Nullish coalescing `??`
 - [ ] Optional chaining `?.` (property + call variants as feasible)
 - [ ] Template literals (restricted): `` `Hello ${x}` ``
