@@ -1,0 +1,79 @@
+#!/usr/bin/env node
+
+import fs from 'node:fs/promises';
+
+import { run } from '../main.js';
+
+function printHelp(exitCode = 0) {
+  const msg = `Usage: jsvm [options]
+
+Runs jsvm (safe JS subset) from stdin or a file.
+
+Options:
+  -f, --file <path>   Read program from file
+  -h, --help          Show this help
+
+Examples:
+  echo 'print(1+2);' | jsvm
+  jsvm --file ./prog.js
+`;
+  (exitCode === 0 ? process.stdout : process.stderr).write(msg);
+  process.exit(exitCode);
+}
+
+function parseArgs(argv) {
+  const args = argv.slice(2);
+  let filePath = null;
+
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '-h' || a === '--help') printHelp(0);
+    if (a === '-f' || a === '--file') {
+      const p = args[i + 1];
+      if (!p) {
+        process.stderr.write('Missing value for --file\n');
+        printHelp(2);
+      }
+      filePath = p;
+      i++;
+      continue;
+    }
+
+    process.stderr.write(`Unknown argument: ${a}\n`);
+    printHelp(2);
+  }
+
+  return { filePath };
+}
+
+async function readStdin() {
+  return await new Promise((resolve, reject) => {
+    let data = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', chunk => (data += chunk));
+    process.stdin.on('end', () => resolve(data));
+    process.stdin.on('error', reject);
+  });
+}
+
+async function main() {
+  const { filePath } = parseArgs(process.argv);
+
+  let src;
+  if (filePath) {
+    src = await fs.readFile(filePath, 'utf8');
+  } else {
+    // If nothing is piped, stdin will be a TTY. In that case, show help.
+    if (process.stdin.isTTY) printHelp(2);
+    src = await readStdin();
+  }
+
+  run(src, {
+    onPrint: s => process.stdout.write(String(s) + '\n'),
+  });
+}
+
+main().catch(err => {
+  process.stderr.write((err?.stack ?? String(err)) + '\n');
+  process.exit(1);
+});

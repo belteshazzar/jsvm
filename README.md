@@ -10,3 +10,17 @@ A small JavaScript virtual machine intended to safely run a curated subset of Ja
 ```zsh
 npm test
 ```
+
+## CLI
+
+Run a snippet from stdin:
+
+```zsh
+echo 'print(1+2);' | node bin/jsvm
+```
+
+Run from a file:
+
+```zsh
+node bin/jsvm --file ./prog.js
+```
