@@ -31,6 +31,13 @@ export default function compile(ast) {
     fn.code.push({ op, a, b, loc: currentLoc });
     return fn.code.length - 1;
   }
+    function emitPropOperand(fn, propNode, computed) {
+      if (!computed && propNode && propNode.type === 'Identifier') {
+        emit(fn, 'CONST', constIndex({ type: 'str', value: propNode.name }));
+      } else {
+        compileExpr(fn, propNode);
+      }
+    }
   function patch(fn, idx, aNew) { fn.code[idx].a = aNew; }
 
   const main = newFunc('(main)', []);
@@ -298,17 +305,10 @@ export default function compile(ast) {
         break;
       case 'Call':
         if (e.callee.type==='Member') {
-          if (e.callee.computed) {
-            compileExpr(fn, e.callee.object);
-            compileExpr(fn, e.callee.property);
-            for (const a of e.args) compileExpr(fn, a);
-            emit(fn,'CALL_ELEM', e.args.length);
-          } else {
-            compileExpr(fn, e.callee.object);
-            compileExpr(fn, e.callee.property);
-            for (const a of e.args) compileExpr(fn, a);
-            emit(fn,'CALL_PROP', e.args.length);
-          }
+          compileExpr(fn, e.callee.object);
+          emitPropOperand(fn, e.callee.property, e.callee.computed);
+          for (const a of e.args) compileExpr(fn, a);
+          emit(fn, e.callee.computed ? 'CALL_ELEM' : 'CALL_PROP', e.args.length);
         } else {
           compileExpr(fn, e.callee);
           for (const a of e.args) compileExpr(fn, a);
@@ -392,12 +392,12 @@ export default function compile(ast) {
       }
       case 'Member':
         compileExpr(fn, e.object);
-        compileExpr(fn, e.property);
+        emitPropOperand(fn, e.property, e.computed);
         emit(fn, e.computed ? 'GET_ELEM' : 'GET_PROP');
         break;
       case 'PropAssign':
         compileExpr(fn, e.object);
-        compileExpr(fn, e.property);
+        emitPropOperand(fn, e.property, e.computed);
         compileExpr(fn, e.value);
         emit(fn, e.computed ? 'SET_ELEM' : 'SET_PROP');
         break;

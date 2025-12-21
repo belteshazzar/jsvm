@@ -17,6 +17,69 @@ export default function createVM(bundle, { onPrint } = {}) {
   if (!Array.isArray(consts)) panic('Malformed bytecode bundle: missing global consts');
 
   // ---- Builtins ----
+  // --- Prototypes ---
+  const ObjectProto = { type: 'proto', map: Object.create(null), proto: null };
+  const StringProto = { type: 'proto', map: Object.create(null), proto: null };
+  const NumberProto = { type: 'proto', map: Object.create(null), proto: null };
+  const ArrayProto = { type: 'proto', map: Object.create(null), proto: null };
+
+  // Object prototype methods
+  ObjectProto.map.toString = {
+    type: 'native', name: 'Object.prototype.toString', arity: 0,
+    call: () => ({ type: 'str', value: '[object Object]' })
+  };
+
+  // String prototype methods
+  function stringValue(thisObj) {
+    if (!thisObj) return '';
+    if (thisObj.type === 'str') return thisObj.value;
+    if (thisObj.type === 'instance' && thisObj.fields && thisObj.proto === StringProto) {
+      const v = thisObj.fields.__value;
+      return v && v.type === 'str' ? v.value : '';
+    }
+    return '';
+  }
+  StringProto.map.toUpperCase = {
+    type: 'native', name: 'String.prototype.toUpperCase', arity: 0,
+    call: (vm, args, thisObj) => ({ type: 'str', value: stringValue(thisObj).toUpperCase() })
+  };
+  StringProto.map.toLowerCase = {
+    type: 'native', name: 'String.prototype.toLowerCase', arity: 0,
+    call: (vm, args, thisObj) => ({ type: 'str', value: stringValue(thisObj).toLowerCase() })
+  };
+  StringProto.map.charAt = {
+    type: 'native', name: 'String.prototype.charAt', arity: 1,
+    call: (vm, args, thisObj) => {
+      const s = stringValue(thisObj);
+      const idx = (args[0] && args[0].type === 'num') ? args[0].value | 0 : 0;
+      const ch = (idx >= 0 && idx < s.length) ? s[idx] : '';
+      return { type: 'str', value: ch };
+    }
+  };
+
+  // Number prototype methods
+  function numberValue(thisObj) {
+    if (!thisObj) return NaN;
+    if (thisObj.type === 'num') return thisObj.value;
+    if (thisObj.type === 'instance' && thisObj.fields && thisObj.proto === NumberProto) {
+      const v = thisObj.fields.__value;
+      return v && v.type === 'num' ? v.value : NaN;
+    }
+    return NaN;
+  }
+  const NumberProtoMethods = {
+    toString: {
+      type: 'native', name: 'Number.prototype.toString', arity: 0,
+      call: (vm, args, thisObj) => ({ type: 'str', value: String(numberValue(thisObj)) })
+    },
+    valueOf: {
+      type: 'native', name: 'Number.prototype.valueOf', arity: 0,
+      call: (vm, args, thisObj) => ({ type: 'num', value: numberValue(thisObj) })
+    },
+  };
+  NumberProto.map.toString = NumberProtoMethods.toString;
+  NumberProto.map.valueOf = NumberProtoMethods.valueOf;
+
   // --- Builtins ---
   const mathFuncs = [
     // [name, arity, fn]
@@ -126,6 +189,66 @@ export default function createVM(bundle, { onPrint } = {}) {
         }
       }
     },
+    Object: {
+      type: 'native',
+      name: 'Object',
+      arity: 1,
+      map: { prototype: ObjectProto },
+      call: (vm, args) => {
+        const v = args[0];
+        if (!v || v.type === 'null' || v.type === 'undef') return { type: 'obj', map: Object.create(null), proto: ObjectProto };
+        if (!isPrimitive(v)) return v;
+        return { type: 'obj', map: { value: v }, proto: ObjectProto };
+      }
+    },
+    String: {
+      type: 'native',
+      name: 'String',
+      arity: 1,
+      map: { prototype: StringProto },
+      call: (vm, args) => {
+        const v = args[0] ?? { type: 'undef' };
+        return { type: 'str', value: toStringV(v) };
+      }
+    },
+    Number: {
+      type: 'native',
+      name: 'Number',
+      arity: 1,
+      map: { prototype: NumberProto },
+      call: (vm, args) => {
+        const v = args[0];
+        const num = Number(v?.type === 'num' ? v.value : toStringV(v ?? { type: 'undef' }));
+        return { type: 'num', value: num };
+      }
+    },
+    Array: {
+      type: 'native',
+      name: 'Array',
+      arity: null,
+      map: {
+        prototype: ArrayProto,
+        isArray: {
+          type: 'native',
+          name: 'Array.isArray',
+          arity: 1,
+          call: (vm, args) => ({ type: 'bool', value: args[0]?.type === 'arr' })
+        }
+      },
+      call: (vm, args) => {
+        const items = [];
+        if (args.length === 1 && args[0]?.type === 'num') {
+          const n = args[0].value;
+          const len = n|0;
+          if (len !== n || len < 0) panic('Invalid array length');
+          for (let i = 0; i < len; i++) items.push({ type: 'undef' });
+        } else {
+          for (const a of args) items.push(a ?? { type: 'undef' });
+        }
+        const arr = { type: 'arr', items, proto: ArrayProto };
+        return arr;
+      }
+    },
   };
 
   // Helper: convert JS value to boxed VM value
@@ -135,9 +258,9 @@ export default function createVM(bundle, { onPrint } = {}) {
     if (typeof val === 'number') return { type: 'num', value: val };
     if (typeof val === 'boolean') return { type: 'bool', value: val };
     if (typeof val === 'string') return { type: 'str', value: val };
-    if (Array.isArray(val)) return { type: 'arr', items: val.map(jsToBoxed) };
+    if (Array.isArray(val)) return { type: 'arr', items: val.map(jsToBoxed), proto: ArrayProto };
     if (typeof val === 'object') {
-      const o = { type: 'obj', map: Object.create(null) };
+      const o = { type: 'obj', map: Object.create(null), proto: ObjectProto };
       for (const k of Object.keys(val)) o.map[k] = jsToBoxed(val[k]);
       return o;
     }
@@ -228,6 +351,7 @@ export default function createVM(bundle, { onPrint } = {}) {
     if (k.type==='null') return 'null';
     panic('Invalid property key type: ' + k.type);
   }
+  const hasOwn = (obj, key) => !!obj && Object.prototype.hasOwnProperty.call(obj, key);
 
   // ---- Environments (lexical) ----
   function Env(parent = null) { return { map: Object.create(null), consts: Object.create(null), parent }; }
@@ -292,6 +416,9 @@ export default function createVM(bundle, { onPrint } = {}) {
     'push','pop','slice','indexOf','includes','join',
     'shift','unshift','splice','reverse','sort','concat'
   ]);
+  for (const m of ARRAY_METHODS) {
+    ArrayProto.map[m] = arrayMethodNative(m);
+  }
   function strictEq(a,b){
     if (a.type!==b.type) return false;
     if (a.type==='num'||a.type==='bool'||a.type==='str') return a.value===b.value;
@@ -422,7 +549,7 @@ export default function createVM(bundle, { onPrint } = {}) {
       if (!v || v.type!=='class') panic(`'${meta.name}' extends non-class '${meta.superName}'`);
       superClass = v;
     }
-    const proto = { type:'proto', map:Object.create(null), proto: superClass ? superClass.proto : null };
+      const proto = { type:'proto', map:Object.create(null), proto: superClass ? superClass.proto : ObjectProto };
     const ctor = meta.ctorIndex != null ? makeClosure(meta.ctorIndex, env) : null;
     const cls = { type:'class', name: meta.name, ctor, proto, super: superClass };
     for (const m of meta.methods) {
@@ -440,14 +567,63 @@ export default function createVM(bundle, { onPrint } = {}) {
     if (recv.type==='arr') {
       if (prop==='length') return {type:'num', value: recv.items.length};
       if (ARRAY_METHODS.has(prop)) return arrayMethodNative(prop);
+      const m = protoLookup(recv.proto, prop);
+      if (m) return m;
       panic("Unknown array property: " + prop);
     }
+    if (recv.type==='str') {
+      if (prop==='length') return { type:'num', value: recv.value.length };
+      const m = protoLookup(StringProto, prop);
+      return m ?? { type:'undef' };
+    }
+    if (recv.type==='num') {
+      if (prop === 'toString') return NumberProtoMethods.toString;
+      if (prop === 'valueOf') return NumberProtoMethods.valueOf;
+      const m = protoLookup(NumberProto, prop);
+      return m ?? { type:'undef' };
+    }
     if (recv.type==='instance') {
-      if (prop in recv.fields) return recv.fields[prop];
+      if (hasOwn(recv.fields, prop)) return recv.fields[prop];
+      const inner = recv.fields?.__value;
+      if (inner) {
+        if (inner.type === 'num') {
+          if (prop === 'toString') return NumberProtoMethods.toString;
+          if (prop === 'valueOf') return NumberProtoMethods.valueOf;
+        }
+        if (inner.type === 'str') {
+          const m = protoLookup(StringProto, prop);
+          if (m) return m;
+        }
+        if (inner.type === 'arr') {
+          const m = protoLookup(ArrayProto, prop);
+          if (m) return m;
+        }
+      }
+      let p = recv.proto;
+      if (!p && inner) {
+        if (inner.type === 'str') p = StringProto;
+        else if (inner.type === 'num') p = NumberProto;
+        else if (inner.type === 'arr') p = ArrayProto;
+        else if (inner.type === 'obj') p = ObjectProto;
+      }
+      const m = protoLookup(p, prop);
+      if (m) return m;
+      return {type:'undef'};
+    }
+    if (recv.type==='obj') {
+      if (prop in recv.map) return recv.map[prop];
+      if (recv.proto) {
+        const m = protoLookup(recv.proto, prop);
+        if (m) return m;
+      }
+      return {type:'undef'};
+    }
+    if (recv.type==='proto') {
+      if (prop in recv.map) return recv.map[prop];
       const m = protoLookup(recv.proto, prop);
       return m ?? {type:'undef'};
     }
-    if (recv.type==='obj') {
+    if (recv.type==='native' && recv.map) {
       return (prop in recv.map) ? recv.map[prop] : {type:'undef'};
     }
     panic('GET_PROP on unsupported type: ' + recv.type);
@@ -473,7 +649,7 @@ export default function createVM(bundle, { onPrint } = {}) {
     }
     if (recv.type==='instance') {
       const prop = keyToString(key);
-      if (prop in recv.fields) return recv.fields[prop];
+      if (hasOwn(recv.fields, prop)) return recv.fields[prop];
       const m = protoLookup(recv.proto, prop);
       return m ?? {type:'undef'};
     }
@@ -695,7 +871,7 @@ export default function createVM(bundle, { onPrint } = {}) {
             binaryCmp(instr.op);
             break;
 
-          case 'MAKE_OBJ': stack.push({type:'obj', map:Object.create(null)}); break;
+          case 'MAKE_OBJ': stack.push({type:'obj', map:Object.create(null), proto: ObjectProto}); break;
           case 'GET_PROP': {
             const key = stack.pop(); const recv = stack.pop(); const prop = keyToString(key);
             const val = getPropValue(recv, prop);
@@ -708,7 +884,7 @@ export default function createVM(bundle, { onPrint } = {}) {
             stack.push(value); break;
           }
 
-          case 'MAKE_ARR': stack.push({type:'arr', items:[]}); break;
+          case 'MAKE_ARR': stack.push({type:'arr', items:[], proto: ArrayProto}); break;
           case 'APPEND_ELEM': {
             const value = stack.pop(); const arr = stack.pop();
             if (arr.type!=='arr') panic('APPEND_ELEM on non-array: '+arr.type);
@@ -729,16 +905,52 @@ export default function createVM(bundle, { onPrint } = {}) {
             const argc = instr.a;
             const args = new Array(argc);
             for (let k=argc-1;k>=0;k--) args[k]=stack.pop();
-            const cls = stack.pop();
-            if (cls.type!=='class') panic('Attempt to instantiate non-class: '+cls.type);
-            const inst = makeInstance(cls);
-            if (cls.ctor) {
-              const isDerived = !!cls.super;
-              pushFrame(cls.ctor, args, inst, { isCtor:true, isDerived, superCalled: !isDerived });
-            } else {
-              stack.push(inst);
+            const ctor = stack.pop();
+            if (ctor.type === 'class') {
+              const inst = makeInstance(ctor);
+              if (ctor.ctor) {
+                const isDerived = !!ctor.super;
+                pushFrame(ctor.ctor, args, inst, { isCtor:true, isDerived, superCalled: !isDerived });
+              } else {
+                stack.push(inst);
+              }
+              break;
             }
-            break;
+            if (ctor.type === 'native') {
+              // Handle built-in native constructors
+              switch (ctor.name) {
+                case 'Array': {
+                  const arr = ctor.call(vm, args, null);
+                  stack.push(arr);
+                  break;
+                }
+                case 'Object': {
+                  const res = ctor.call(vm, args, null);
+                  stack.push(res);
+                  break;
+                }
+                case 'String': {
+                  const s = ctor.call(vm, args, null);
+                  const fields = Object.create(null);
+                  fields.__value = s;
+                  const inst = { type: 'instance', cls: null, fields, proto: StringProto };
+                  stack.push(inst);
+                  break;
+                }
+                case 'Number': {
+                  const n = ctor.call(vm, args, null);
+                  const fields = Object.create(null);
+                  fields.__value = n;
+                  const inst = { type: 'instance', cls: null, fields, proto: NumberProto };
+                  stack.push(inst);
+                  break;
+                }
+                default:
+                  panic('Attempt to instantiate non-class: ' + ctor.name);
+              }
+              break;
+            }
+            panic('Attempt to instantiate non-class: ' + ctor.type);
           }
 
           case 'NULLISH_COALESCE': {
@@ -773,9 +985,9 @@ export default function createVM(bundle, { onPrint } = {}) {
     if (v.type==='null') return {type:'null'};
     if (v.type==='undef') return {type:'undef'};
     if (v.type==='str') return {type:'str', value:v.value};
-    if (v.type==='obj') { const o={type:'obj', map:Object.create(null)}; for (const k of Object.keys(v.map)) o.map[k]=v.map[k]; return o; }
-    if (v.type==='arr') { return {type:'arr', items:v.items.slice()}; }
-    return v; // classes/instances/functions/natives are identity
+    if (v.type==='obj') { const o={type:'obj', map:Object.create(null), proto:v.proto??null}; for (const k of Object.keys(v.map)) o.map[k]=v.map[k]; return o; }
+    if (v.type==='arr') { return {type:'arr', items:v.items.slice(), proto:v.proto??ArrayProto}; }
+    return v; // classes/instances/functions/natives/instances are identity
   }
 
   return vm;
