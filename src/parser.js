@@ -42,19 +42,11 @@ export default function parse(tokens) {
     if (at('CONST')) return constDecl();
     if (at('IF')) return ifStmt();
     if (at('WHILE')) return whileStmt();
-    if (at('FOR')) return forStmt();
+    if (at('SWITCH')) return switchStmt();
+    if (at('BREAK')) return breakStmt();
+    if (at('CONTINUE')) return continueStmt();
     if (at('FUNCTION')) return funcDecl();
     if (at('RETURN')) return returnStmt();
-    if (at('BREAK')) {
-      const start = next();
-      expect('SEMI', "Expected ';' after break");
-      return { type:'Break', loc: locFrom(start) };
-    }
-    if (at('CONTINUE')) {
-      const start = next();
-      expect('SEMI', "Expected ';' after continue");
-      return { type:'Continue', loc: locFrom(start) };
-    }
     if (at('CLASS')) return classDecl();
     if (at('LBRACE')) return block();
     const e = expr();
@@ -62,63 +54,16 @@ export default function parse(tokens) {
     return { type:'ExprStmt', expr:e };
   }
 
-  function parseForInitPart() {
-    if (at('SEMI')) return { kind: 'empty', node: null };
-    if (at('LET')) {
-      const start = next();
-      const nameTok = expect('IDENT', "Expected variable name");
-      let init = null;
-      if (at('EQUAL')) { next(); init = expr(); }
-      return { kind: 'let', node: { type:'VarDecl', name: nameTok.value, init, loc: locFrom(start) } };
-    }
-    if (at('CONST')) {
-      const start = next();
-      const nameTok = expect('IDENT', 'Expected constant name');
-      expect('EQUAL', "Expected '=' after const name");
-      const init = expr();
-      return { kind: 'const', node: { type:'ConstDecl', name: nameTok.value, init, loc: locFrom(start) } };
-    }
-    return { kind: 'expr', node: expr() };
+  function breakStmt() {
+    const start = next(); // BREAK
+    expect('SEMI', "Expected ';' after break");
+    return { type:'Break', loc: locFrom(start) };
   }
 
-  function forStmt() {
-    const start = next(); // FOR
-    expect('LPAREN', "Expected '(' after for");
-
-    // For-of / For-in forms: for (let x of expr) stmt
-    // or for (x of expr) stmt, and similarly for `in`.
-    const cp = checkpoint();
-    let declKind = null;
-    let target = null;
-    if (at('LET') || at('CONST')) {
-      declKind = next().type.toLowerCase();
-      const nameTok = expect('IDENT', 'Expected loop variable');
-      target = { type:'Identifier', name: nameTok.value, loc: locFrom(nameTok) };
-    } else if (at('IDENT')) {
-      const nameTok = next();
-      target = { type:'Identifier', name: nameTok.value, loc: locFrom(nameTok) };
-    }
-    if (target && (at('OF') || at('IN'))) {
-      const kw = next();
-      const right = expr();
-      expect('RPAREN', "Expected ')' after for header");
-      const body = at('LBRACE') ? block() : stmt();
-      const node = { type: kw.type === 'OF' ? 'ForOf' : 'ForIn', left: target, declKind, right, body, loc: locFrom(start) };
-      return node;
-    }
-    restore(cp);
-
-    // Classic for: for (init; test; update) stmt
-    const initPart = parseForInitPart();
-    expect('SEMI', "Expected ';' after for initializer");
-    let test = null;
-    if (!at('SEMI')) test = expr();
-    expect('SEMI', "Expected ';' after for test");
-    let update = null;
-    if (!at('RPAREN')) update = expr();
-    expect('RPAREN', "Expected ')' after for update");
-    const body = at('LBRACE') ? block() : stmt();
-    return { type:'For', init: initPart, test, update, body, loc: locFrom(start) };
+  function continueStmt() {
+    const start = next(); // CONTINUE
+    expect('SEMI', "Expected ';' after continue");
+    return { type:'Continue', loc: locFrom(start) };
   }
 
   function constDecl() {
@@ -137,6 +82,42 @@ export default function parse(tokens) {
     if (at('EQUAL')) { next(); init = expr(); }
     expect('SEMI', "Expected ';' after variable declaration");
     return { type:'VarDecl', name: nameTok.value, init, loc: locFrom(start) };
+  }
+
+  function switchStmt() {
+    const start = next(); // SWITCH
+    expect('LPAREN', "Expected '(' after switch");
+    const disc = expr();
+    expect('RPAREN', "Expected ')' after switch expression");
+    expect('LBRACE', "Expected '{' after switch(...)");
+
+    const cases = [];
+    let defaultCase = null;
+    while (!at('RBRACE')) {
+      if (at('CASE')) {
+        const cTok = next();
+        const test = expr();
+        expect('COLON', "Expected ':' after case expression");
+        const body = [];
+        while (!at('CASE') && !at('DEFAULT') && !at('RBRACE')) {
+          body.push(stmt());
+        }
+        cases.push({ type:'Case', test, body, loc: locFrom(cTok) });
+      } else if (at('DEFAULT')) {
+        const dTok = next();
+        expect('COLON', "Expected ':' after default");
+        const body = [];
+        while (!at('CASE') && !at('DEFAULT') && !at('RBRACE')) {
+          body.push(stmt());
+        }
+        if (defaultCase) panic('Multiple default clauses in switch', dTok);
+        defaultCase = { type:'Default', body, loc: locFrom(dTok) };
+      } else {
+        panic('Expected case or default in switch', peek());
+      }
+    }
+    expect('RBRACE', "Expected '}' after switch cases");
+    return { type:'Switch', disc, cases, defaultCase, loc: locFrom(start) };
   }
 
   function ifStmt() {

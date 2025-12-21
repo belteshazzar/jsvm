@@ -74,9 +74,6 @@ Note: `EQ/NE` are type-strict in this implementation (values of different `type`
 - `GET_ELEM`: pop key + recv, push recv[key].
 - `SET_ELEM`: pop value + key + recv, set and push value.
 
-- `IS_ARR`: pop value, push bool.
-  - Semantics: pushes `true` iff the popped value is an array boxed value (`{type:'arr'}`).
-
 ## Functions / calls
 
 - `MAKE_FUNCTION a`: create closure from `functions[a]` capturing current env.

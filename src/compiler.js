@@ -32,12 +32,6 @@ export default function compile(ast) {
   }
   function patch(fn, idx, aNew) { fn.code[idx].a = aNew; }
 
-  const loopStack = [];
-  function inLoop() { return loopStack.length > 0; }
-  function curLoop() { return loopStack[loopStack.length - 1]; }
-  function pushLoop(ctx) { loopStack.push(ctx); }
-  function popLoop() { return loopStack.pop(); }
-
   const main = newFunc('(main)', []);
   compileBlockLike(main, ast.body);
   // Only emit CONST null if the last statement is not an ExprStmt
@@ -95,8 +89,6 @@ export default function compile(ast) {
         break;
       case 'While': {
         const start = fn.code.length;
-        const loopCtx = { breakJumps: [], continueTarget: start };
-        pushLoop(loopCtx);
         compileExpr(fn, s.cond);
         const jfalse = emit(fn,'JMP_IF_FALSE',null);
         emit(fn,'POP');
@@ -104,252 +96,89 @@ export default function compile(ast) {
         emit(fn,'JMP', start);
         patch(fn, jfalse, fn.code.length);
         emit(fn,'POP');
-        for (const j of loopCtx.breakJumps) patch(fn, j, fn.code.length);
-        popLoop();
         break;
       }
+      case 'Switch': {
+        // Lower `switch` using strict case matching and fallthrough.
+        //
+        // Build jump targets for each case body; once we enter any case body,
+        // execution falls through into subsequent bodies until a `break`.
+        //
+        // Stack discipline:
+        // - During test phase: keep discriminant on stack.
+        // - Right before entering the first selected body: pop discriminant.
+        // - If no match and default exists: pop discriminant before default.
+        // - If no match and no default: pop discriminant and continue.
+        // Evaluate discriminant once, store it so comparisons don't rely on
+        // fragile stack shuffling and constant indices.
+        const discTmp = `__switch_disc_${fn.code.length}`;
+        compileExpr(fn, s.disc);
+        emit(fn, 'DEFINE_NAME', discTmp);
 
-      case 'For': {
-        emit(fn, 'SCOPE_PUSH');
-
-        // init
-        if (s.init?.kind === 'let' || s.init?.kind === 'const') {
-          compileStmt(fn, s.init.node);
-        } else if (s.init?.kind === 'expr') {
-          compileExpr(fn, s.init.node);
-          emit(fn, 'POP');
+        const caseBodyJumps = [];
+        for (const c of s.cases) {
+          emit(fn, 'LOAD_NAME', discTmp);
+          compileExpr(fn, c.test);
+          emit(fn, 'EQ');
+          const j = emit(fn, 'JMP_IF_TRUE', null);
+          caseBodyJumps.push({ jumpIndex: j, caseNode: c });
         }
 
-        const loopStart = fn.code.length;
-        if (s.test) {
-          compileExpr(fn, s.test);
+        const jNoMatch = emit(fn, 'JMP', null);
+
+        const switchBreaks = [];
+        const endOfBodiesJumps = [];
+        let discCleaned = false;
+
+        for (const { jumpIndex, caseNode } of caseBodyJumps) {
+          patch(fn, jumpIndex, fn.code.length);
+          if (!discCleaned) {
+            // Remove temp from scope by assigning null (no delete op in VM).
+            emit(fn, 'CONST', constIndex(fn, { type: 'null' }));
+            emit(fn, 'STORE_NAME', discTmp);
+            discCleaned = true;
+          }
+          for (const st of caseNode.body) {
+            if (st.type === 'Break') {
+              switchBreaks.push(emit(fn, 'JMP', null));
+            } else {
+              compileStmt(fn, st);
+            }
+          }
+        }
+
+        // If we entered a case body, skip default by jumping to end.
+        if (discCleaned) {
+          endOfBodiesJumps.push(emit(fn, 'JMP', null));
+        }
+
+        const defaultStart = fn.code.length;
+        patch(fn, jNoMatch, defaultStart);
+        if (s.defaultCase) {
+          if (!discCleaned) {
+            emit(fn, 'CONST', constIndex(fn, { type: 'null' }));
+            emit(fn, 'STORE_NAME', discTmp);
+            discCleaned = true;
+          }
+          for (const st of s.defaultCase.body) {
+            if (st.type === 'Break') {
+              switchBreaks.push(emit(fn, 'JMP', null));
+            } else {
+              compileStmt(fn, st);
+            }
+          }
         } else {
-          emit(fn, 'CONST', constIndex(fn, { type: 'bool', value: true }));
-        }
-        const jfalse = emit(fn, 'JMP_IF_FALSE', null);
-        emit(fn, 'POP');
-
-        const continueTarget = fn.code.length; // body start; continue should jump to update, but we'll patch below
-        const loopCtx = { breakJumps: [], continueJumps: [], continueTarget: null };
-        pushLoop(loopCtx);
-
-        compileStmt(fn, s.body);
-        emit(fn, 'POP');
-
-        const updateStart = fn.code.length;
-        loopCtx.continueTarget = updateStart;
-        for (const j of loopCtx.continueJumps) patch(fn, j, updateStart);
-
-        if (s.update) {
-          compileExpr(fn, s.update);
-          emit(fn, 'POP');
+          if (!discCleaned) {
+            emit(fn, 'CONST', constIndex(fn, { type: 'null' }));
+            emit(fn, 'STORE_NAME', discTmp);
+            discCleaned = true;
+          }
         }
 
-        emit(fn, 'JMP', loopStart);
-        patch(fn, jfalse, fn.code.length);
-        emit(fn, 'POP');
-        for (const j of loopCtx.breakJumps) patch(fn, j, fn.code.length);
-        popLoop();
-        emit(fn, 'SCOPE_POP');
-        // for-statement value is null
-        emit(fn, 'CONST', constIndex(fn, { type: 'null' }));
-        break;
-      }
+        const end = fn.code.length;
+        for (const j of switchBreaks) patch(fn, j, end);
+        for (const j of endOfBodiesJumps) patch(fn, j, end);
 
-      case 'Break': {
-        if (!inLoop()) panic('break used outside of loop');
-        const j = emit(fn, 'JMP', null);
-        curLoop().breakJumps.push(j);
-        emit(fn, 'CONST', constIndex(fn, { type: 'null' }));
-        break;
-      }
-
-      case 'Continue': {
-        if (!inLoop()) panic('continue used outside of loop');
-        const ctx = curLoop();
-        if (ctx.continueTarget != null) {
-          emit(fn, 'JMP', ctx.continueTarget);
-        } else {
-          // for-loops set continueTarget later; patch.
-          const j = emit(fn, 'JMP', null);
-          ctx.continueJumps = ctx.continueJumps ?? [];
-          ctx.continueJumps.push(j);
-        }
-        emit(fn, 'CONST', constIndex(fn, { type: 'null' }));
-        break;
-      }
-
-      case 'ForOf': {
-        // Limited for..of: arrays only, identifier target only.
-        // Lowers to index-based loop.
-        emit(fn, 'SCOPE_PUSH');
-
-        // Evaluate iterable once.
-        compileExpr(fn, s.right);
-        emit(fn, 'DEFINE_CONST', '__src');
-
-        // Fast path arrays: __iter = __src; else __iter = iter(__src)
-        emit(fn, 'LOAD_NAME', '__src');
-        emit(fn, 'IS_ARR');
-        const jNotArr = emit(fn, 'JMP_IF_FALSE', null);
-        emit(fn, 'POP');
-        emit(fn, 'LOAD_NAME', '__src');
-        emit(fn, 'DEFINE_CONST', '__arr');
-        emit(fn, 'CONST', constIndex(fn, { type: 'num', value: 0 }));
-        emit(fn, 'DEFINE_NAME', '__i');
-        const jArrDone = emit(fn, 'JMP', null);
-
-        patch(fn, jNotArr, fn.code.length);
-        emit(fn, 'POP');
-        emit(fn, 'LOAD_NAME', 'iter');
-        emit(fn, 'LOAD_NAME', '__src');
-        emit(fn, 'CALL', 1);
-        emit(fn, 'DEFINE_CONST', '__it');
-        patch(fn, jArrDone, fn.code.length);
-
-        // Declare loop variable if requested.
-        if (s.declKind === 'const') {
-          emit(fn, 'CONST', constIndex(fn, { type: 'null' }));
-          emit(fn, 'DEFINE_CONST', s.left.name);
-        } else if (s.declKind === 'let') {
-          emit(fn, 'CONST', constIndex(fn, { type: 'null' }));
-          emit(fn, 'DEFINE_NAME', s.left.name);
-        }
-
-        const loopStart = fn.code.length;
-        const loopCtx = { breakJumps: [], continueTarget: loopStart };
-        pushLoop(loopCtx);
-
-        // If array path: condition/value by index; else use iter_next
-        emit(fn, 'LOAD_NAME', '__src');
-        emit(fn, 'IS_ARR');
-        const jIterPath = emit(fn, 'JMP_IF_FALSE', null);
-        emit(fn, 'POP');
-        // array path
-        emit(fn, 'LOAD_NAME', '__i');
-        emit(fn, 'LOAD_NAME', '__arr');
-        emit(fn, 'CONST', constIndex(fn, { type: 'str', value: 'length' }));
-        emit(fn, 'GET_PROP');
-        emit(fn, 'LT');
-        const jfalseArr = emit(fn, 'JMP_IF_FALSE', null);
-        emit(fn, 'POP');
-        emit(fn, 'LOAD_NAME', '__arr');
-        emit(fn, 'LOAD_NAME', '__i');
-        emit(fn, 'GET_ELEM');
-        const jAfterNext = emit(fn, 'JMP', null);
-
-        // iterator path
-        patch(fn, jIterPath, fn.code.length);
-        emit(fn, 'POP');
-        emit(fn, 'LOAD_NAME', 'iter_next');
-        emit(fn, 'LOAD_NAME', '__it');
-        emit(fn, 'CALL', 1);
-        emit(fn, 'DEFINE_CONST', '__step');
-        // if (__step.done) break
-        emit(fn, 'LOAD_NAME', '__step');
-        emit(fn, 'CONST', constIndex(fn, { type: 'str', value: 'done' }));
-        emit(fn, 'GET_PROP');
-        const jStepNotDone = emit(fn, 'JMP_IF_FALSE', null);
-        emit(fn, 'POP');
-        const jfalseIter = emit(fn, 'JMP', null);
-        patch(fn, jStepNotDone, fn.code.length);
-        emit(fn, 'POP');
-        // value = __step.value
-        emit(fn, 'LOAD_NAME', '__step');
-        emit(fn, 'CONST', constIndex(fn, { type: 'str', value: 'value' }));
-        emit(fn, 'GET_PROP');
-
-        patch(fn, jAfterNext, fn.code.length);
-
-        // assign to loop variable
-        if (s.declKind === 'const') {
-          emit(fn, 'STORE_NAME', s.left.name);
-          emit(fn, 'POP');
-        } else if (s.declKind === 'let') {
-          emit(fn, 'STORE_NAME', s.left.name);
-          emit(fn, 'POP');
-        } else {
-          // no decl: assignment target must already exist
-          emit(fn, 'STORE_NAME', s.left.name);
-          emit(fn, 'POP');
-        }
-
-        compileStmt(fn, s.body);
-        emit(fn, 'POP');
-
-        // increment for array path
-        emit(fn, 'LOAD_NAME', '__src');
-        emit(fn, 'IS_ARR');
-        const jNoInc = emit(fn, 'JMP_IF_FALSE', null);
-        emit(fn, 'POP');
-        emit(fn, 'LOAD_NAME', '__i');
-        emit(fn, 'CONST', constIndex(fn, { type: 'num', value: 1 }));
-        emit(fn, 'ADD');
-        emit(fn, 'STORE_NAME', '__i');
-        emit(fn, 'POP');
-        patch(fn, jNoInc, fn.code.length);
-        emit(fn, 'POP');
-
-        emit(fn, 'JMP', loopStart);
-        patch(fn, jfalseArr, fn.code.length);
-        emit(fn, 'POP');
-        patch(fn, jfalseIter, fn.code.length);
-        emit(fn, 'POP');
-        for (const j of loopCtx.breakJumps) patch(fn, j, fn.code.length);
-        popLoop();
-        emit(fn, 'SCOPE_POP');
-        emit(fn, 'CONST', constIndex(fn, { type: 'null' }));
-        break;
-      }
-
-      case 'ForIn': {
-        // Limited for..in: plain objects only, identifier target only.
-        // Lowers to: const __keys = keys(obj); for (let __i=0; __i<__keys.length; __i++) { <lhs> = __keys[__i]; body }
-        emit(fn, 'SCOPE_PUSH');
-
-        emit(fn, 'LOAD_NAME', 'keys');
-        compileExpr(fn, s.right);
-        emit(fn, 'CALL', 1);
-        emit(fn, 'DEFINE_CONST', '__keys');
-        emit(fn, 'CONST', constIndex(fn, { type: 'num', value: 0 }));
-        emit(fn, 'DEFINE_NAME', '__i');
-
-        if (s.declKind === 'const') {
-          emit(fn, 'CONST', constIndex(fn, { type: 'null' }));
-          emit(fn, 'DEFINE_CONST', s.left.name);
-        } else if (s.declKind === 'let') {
-          emit(fn, 'CONST', constIndex(fn, { type: 'null' }));
-          emit(fn, 'DEFINE_NAME', s.left.name);
-        }
-
-        const loopStart = fn.code.length;
-        emit(fn, 'LOAD_NAME', '__i');
-        emit(fn, 'LOAD_NAME', '__keys');
-        emit(fn, 'CONST', constIndex(fn, { type: 'str', value: 'length' }));
-        emit(fn, 'GET_PROP');
-        emit(fn, 'LT');
-        const jfalse = emit(fn, 'JMP_IF_FALSE', null);
-        emit(fn, 'POP');
-
-        emit(fn, 'LOAD_NAME', '__keys');
-        emit(fn, 'LOAD_NAME', '__i');
-        emit(fn, 'GET_ELEM');
-        emit(fn, 'STORE_NAME', s.left.name);
-        emit(fn, 'POP');
-
-        compileStmt(fn, s.body);
-        emit(fn, 'POP');
-
-        emit(fn, 'LOAD_NAME', '__i');
-        emit(fn, 'CONST', constIndex(fn, { type: 'num', value: 1 }));
-        emit(fn, 'ADD');
-        emit(fn, 'STORE_NAME', '__i');
-        emit(fn, 'POP');
-
-        emit(fn, 'JMP', loopStart);
-        patch(fn, jfalse, fn.code.length);
-        emit(fn, 'POP');
-        emit(fn, 'SCOPE_POP');
         emit(fn, 'CONST', constIndex(fn, { type: 'null' }));
         break;
       }
