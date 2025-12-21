@@ -137,7 +137,9 @@ export default function compile(ast) {
         compileExpr(fn, e.left);
         compileExpr(fn, e.right);
         emit(fn, ({'+':'ADD','-':'SUB','*':'MUL','/':'DIV','%':'MOD',
-                   '<':'LT','>':'GT','<=':'LE','>=':'GE','==':'EQ','!=':'NE'})[e.op]);
+                   '<':'LT','>':'GT','<=':'LE','>=':'GE',
+                   '==':'EQ','!=':'NE',
+                   '===':'SEQ','!==':'SNE'})[e.op]);
         break;
       case 'Logical':
         compileExpr(fn, e.left);
@@ -216,6 +218,7 @@ export default function compile(ast) {
 
   function boxLiteral(x) {
     if (x === null) return {type:'null'};
+    if (x === undefined) return {type:'undef'};
     switch (typeof x) {
       case 'number': return {type:'num', value:x};
       case 'string': return {type:'str', value:x};

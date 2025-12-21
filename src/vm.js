@@ -98,6 +98,10 @@ export default function createVM(bundle, { onPrint } = {}) {
     }
     let res;
     if (op==='EQ'||op==='NE'){ const e=eq(a,b); res = (op==='EQ')?e:!e; }
+    else if (op==='SEQ'||op==='SNE') {
+      const e = strictEq(a, b);
+      res = (op==='SEQ') ? e : !e;
+    }
     else { const an=ensureNum(a), bn=ensureNum(b);
       res = ({LT:an<bn, LE:an<=bn, GT:an>bn, GE:an>=bn})[op];
     }
@@ -132,9 +136,9 @@ export default function createVM(bundle, { onPrint } = {}) {
           for (const v of args) arr.items.push(v);
           return {type:'num', value: arr.items.length};
         case 'pop':
-          return arr.items.length? arr.items.pop() : {type:'null'};
+          return arr.items.length? arr.items.pop() : {type:'undef'};
         case 'shift':
-          return arr.items.length? arr.items.shift() : {type:'null'};
+          return arr.items.length? arr.items.shift() : {type:'undef'};
         case 'unshift':
           for (let i=0;i<args.length;i++) arr.items.splice(i,0,args[i]);
           return {type:'num', value: arr.items.length};
@@ -184,13 +188,13 @@ export default function createVM(bundle, { onPrint } = {}) {
           return { type:'arr', items: out };
         }
         case 'indexOf': {
-          const search = args[0] ?? {type:'null'};
+          const search = args[0] ?? {type:'undef'};
           const from = (args[1] && args[1].type==='num') ? (args[1].value|0) : 0;
           for (let i=Math.max(0,from); i<arr.items.length; i++) if (strictEq(arr.items[i], search)) return {type:'num', value:i};
           return {type:'num', value:-1};
         }
         case 'includes': {
-          const search = args[0] ?? {type:'null'};
+          const search = args[0] ?? {type:'undef'};
           const from = (args[1] && args[1].type==='num') ? (args[1].value|0) : 0;
           for (let i=Math.max(0,from); i<arr.items.length; i++) if (strictEq(arr.items[i], search)) return {type:'bool', value:true};
           return {type:'bool', value:false};
@@ -271,10 +275,10 @@ export default function createVM(bundle, { onPrint } = {}) {
     if (recv.type==='instance') {
       if (prop in recv.fields) return recv.fields[prop];
       const m = protoLookup(recv.proto, prop);
-      return m ?? {type:'null'};
+      return m ?? {type:'undef'};
     }
     if (recv.type==='obj') {
-      return (prop in recv.map) ? recv.map[prop] : {type:'null'};
+      return (prop in recv.map) ? recv.map[prop] : {type:'undef'};
     }
     panic('GET_PROP on unsupported type: ' + recv.type);
   }
@@ -291,24 +295,24 @@ export default function createVM(bundle, { onPrint } = {}) {
     if (recv.type==='arr') {
       if (key.type==='str' && key.value==='length') return {type:'num', value: recv.items.length};
       const idx = ensureIndex(key);
-      return (idx < recv.items.length) ? recv.items[idx] : {type:'null'};
+      return (idx < recv.items.length) ? recv.items[idx] : {type:'undef'};
     }
     if (recv.type==='obj') {
       const prop = keyToString(key);
-      return (prop in recv.map) ? recv.map[prop] : {type:'null'};
+      return (prop in recv.map) ? recv.map[prop] : {type:'undef'};
     }
     if (recv.type==='instance') {
       const prop = keyToString(key);
       if (prop in recv.fields) return recv.fields[prop];
       const m = protoLookup(recv.proto, prop);
-      return m ?? {type:'null'};
+      return m ?? {type:'undef'};
     }
     panic('GET_ELEM on unsupported type: ' + recv.type);
   }
   function setElemValue(recv, key, value) {
     if (recv.type==='arr') {
       const idx = ensureIndex(key);
-      while (recv.items.length < idx) recv.items.push({type:'null'});
+      while (recv.items.length < idx) recv.items.push({type:'undef'});
       recv.items[idx] = value; return;
     }
     if (recv.type==='obj') { recv.map[keyToString(key)] = value; return; }
@@ -435,7 +439,11 @@ export default function createVM(bundle, { onPrint } = {}) {
           case 'NEG': { const v=ensureNum(stack.pop()); stack.push({type:'num', value: -v}); break; }
 
           case 'ADD': case 'SUB': case 'MUL': case 'DIV': case 'MOD': binaryMath(instr.op); break;
-          case 'LT': case 'LE': case 'GT': case 'GE': case 'EQ': case 'NE': binaryCmp(instr.op); break;
+          case 'LT': case 'LE': case 'GT': case 'GE':
+          case 'EQ': case 'NE':
+          case 'SEQ': case 'SNE':
+            binaryCmp(instr.op);
+            break;
 
           case 'MAKE_OBJ': stack.push({type:'obj', map:Object.create(null)}); break;
           case 'GET_PROP': {

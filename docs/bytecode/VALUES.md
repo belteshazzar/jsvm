@@ -8,7 +8,15 @@ The VM operates on boxed values with a `{type, ...}` tag.
 - `{ type: 'str', value: string }`
 - `{ type: 'bool', value: boolean }`
 - `{ type: 'null' }`
-- `{ type: 'undef' }` (used internally; not currently emitted by parser/compiler)
+- `{ type: 'undef' }` (`undefined`)
+
+## Null vs undefined semantics
+
+This VM aims to feel like JavaScript:
+
+- Missing object properties yield `undefined`.
+- Missing array indices yield `undefined`.
+- `null` is only produced explicitly by the `null` literal (or by code that stores `{type:'null'}` into objects/arrays).
 
 ## Compound values
 

@@ -155,7 +155,7 @@ export default function parse(tokens) {
 
   function equality() {
     let left = comparison();
-    while (at('==') || at('!=')) {
+    while (at('==') || at('!=') || at('===') || at('!==')) {
       const t = next().type;
       const right = comparison();
       left = { type:'Binary', op:t, left, right };
@@ -264,6 +264,7 @@ export default function parse(tokens) {
     if (at('TRUE')) { next(); return { type:'Literal', value:true }; }
     if (at('FALSE')) { next(); return { type:'Literal', value:false }; }
     if (at('NULL')) { next(); return { type:'Literal', value:null }; }
+    if (at('IDENT') && peek().value === 'undefined') { next(); return { type:'Literal', value: undefined }; }
     if (at('THIS')) { next(); return { type:'This' }; }
     if (at('SUPER')) { next(); return { type:'Super' }; }
     if (at('IDENT')) return { type:'Identifier', name: next().value };

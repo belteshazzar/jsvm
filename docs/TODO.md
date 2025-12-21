@@ -21,8 +21,8 @@ Non-goals (intentionally omitted from the subset):
 ### Language features
 - [x] Real block scoping for `{}` (lexical environments)
 - [x] `const` declarations and const-assignment errors
-- [ ] `undefined` literal (and decide `null` vs `undefined` semantics for “missing”)
-- [ ] Strict equality: `===` and `!==`
+- [x] `undefined` literal + JS-like `null` vs `undefined` semantics for “missing”
+- [x] Strict equality: `===` and `!==`
 - [ ] Ternary operator: `cond ? a : b`
 - [ ] Nullish coalescing `??`
 - [ ] Optional chaining `?.` (property + call variants as feasible)

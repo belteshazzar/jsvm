@@ -48,9 +48,15 @@ Conventions:
 
 ## Comparisons
 
-- `LT`, `LE`, `GT`, `GE`, `EQ`, `NE`
+- `LT`, `LE`, `GT`, `GE`, `EQ`, `NE`, `SEQ`, `SNE`
 
 Note: `EQ/NE` are type-strict in this implementation (values of different `type` are never equal).
+
+`SEQ/SNE` implement JavaScript-like strict equality over boxed values:
+- Different `type` is always not equal.
+- Primitives compare by `value`.
+- `null` equals `null`; `undef` equals `undef`; `null` is not equal to `undef`.
+- Objects/arrays/instances/classes/functions compare by identity.
 
 ## Objects / arrays
 
