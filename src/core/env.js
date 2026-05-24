@@ -182,6 +182,37 @@ export function createDefaultEnv({ onPrint, onUnhandledRejection } = {}) {
 
   const builtins = {
     print: { type:'native', name:'print', arity:1, call:(vm,args)=>{ const s = vm.toStringV(args[0] ?? {type:'null'}); onPrint?.(s); return {type:'null'}; } },
+    setTimeout: {
+      type: 'native',
+      name: 'setTimeout',
+      arity: 2,
+      call: (vm, args) => {
+        const callback = args[0];
+        const delayArg = args[1] ?? { type: 'num', value: 0 };
+        
+        // Type checking
+        if (!callback || (callback.type !== 'native' && callback.type !== 'func')) {
+          panic('TypeError: Callback must be a function');
+        }
+        
+        // Extract delay as number
+        let delay = 0;
+        if (delayArg.type === 'num') {
+          delay = Math.max(0, Math.floor(delayArg.value));
+        }
+        
+        // Schedule the callback via VM's timer queue (respects delay)
+        const timerId = vm.enqueueTimer(() => {
+          try {
+            vm.callCallable(callback, [], null);
+          } catch (err) {
+            // Ignore errors in setTimeout callbacks
+          }
+        }, delay);
+        
+        return { type: 'num', value: timerId };
+      }
+    },
     console: ConsoleObj,
     Math: MathObj,
     JSON: {

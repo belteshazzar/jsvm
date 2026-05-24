@@ -43,7 +43,7 @@ test('bytecode: async/await functions preserved through encode/decode', async ()
   // didn't save the 'async' flag on function objects.
   const src = `
     async function addOneLater(x) {
-      await new Promise(r => setTimeout(r, 1));
+      await Promise.resolve();
       return x + 1;
     }
     

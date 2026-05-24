@@ -272,6 +272,8 @@ export default function createVM(bundle, { env: providedEnv, microtaskLimit = 10
   const stack = [];
   const callstack = [];
   const microtasks = [];
+  const timers = []; // Pending timers: { callback, scheduledTime }
+  let nextTimerId = 1;
   const pendingUnhandledRejections = new Set();
   let drainingMicrotasks = false;
   const globals = Env(null);
@@ -323,6 +325,37 @@ export default function createVM(bundle, { env: providedEnv, microtaskLimit = 10
       promise.unhandledReported = true;
       onUnhandledRejection(formatUnhandledRejection(promise.value), promise);
     }
+  }
+
+  function runTimers() {
+    // Process all timers that are ready to execute
+    // For simplicity, execute timers in order of their scheduled time
+    let ran = 0;
+    const now = Date.now();
+    const readyTimers = [];
+    
+    // Find all ready timers
+    let i = 0;
+    while (i < timers.length) {
+      if (timers[i].scheduledTime <= now) {
+        readyTimers.push(timers[i]);
+        timers.splice(i, 1);
+      } else {
+        i++;
+      }
+    }
+    
+    // Execute ready timers in order
+    for (const timerJob of readyTimers) {
+      try {
+        timerJob.callback();
+      } catch (err) {
+        // Ignore errors in timer callbacks
+      }
+      ran++;
+    }
+    
+    return ran;
   }
 
   function markPromiseHandled(promise) {
@@ -755,6 +788,14 @@ export default function createVM(bundle, { env: providedEnv, microtaskLimit = 10
     jsToBoxedValue,
     enqueueMicrotask,
     runMicrotasks,
+    enqueueTimer(callback, delay) {
+      const scheduledTime = Date.now() + delay;
+      const timerId = nextTimerId++;
+      timers.push({ callback, scheduledTime, timerId });
+      // Keep timers sorted by scheduled time
+      timers.sort((a, b) => a.scheduledTime - b.scheduledTime);
+      return timerId;
+    },
     createPromise: createPromiseValue,
     promiseResolve: resolvePromise,
     promiseReject: rejectPromise,
@@ -1277,8 +1318,14 @@ export default function createVM(bundle, { env: providedEnv, microtaskLimit = 10
           return stack.pop();
         }
 
-        const ran = runMicrotasks();
-        if (callstack.length === 0 && ran === 0) break;
+        // Run microtasks first (Promise reactions, async/await continuations)
+        const ranMicrotasks = runMicrotasks();
+        
+        // Then run any timers that are ready to execute
+        const ranTimers = runTimers();
+        
+        // Continue if there's still work: more on call stack, more timers pending, or microtasks ran
+        if (callstack.length === 0 && ranMicrotasks === 0 && ranTimers === 0 && timers.length === 0) break;
       }
       return stack.pop();
     },

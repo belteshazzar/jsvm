@@ -12,11 +12,18 @@ export function compileSource(src) {
 
 export function runAndCapture(src, options = {}) {
   const output = [];
+  const unhandledRejections = [];
   const bc = compileSource(src);
   const env = createDefaultEnv({
     onPrint: s => {
       output.push(s);
       options.onPrint?.(s);
+    },
+    onUnhandledRejection: (message) => {
+      // Collect unhandled rejections for debugging, but don't print to stderr
+      // in tests. This avoids polluting test output while still tracking them.
+      unhandledRejections.push(message);
+      options.onUnhandledRejection?.(message);
     }
   });
   
@@ -27,7 +34,7 @@ export function runAndCapture(src, options = {}) {
   
   const vm = createVM(bc, { env });
   const ret = vm.runMain();
-  return { ret, output, bc };
+  return { ret, output, bc, unhandledRejections };
 }
 
 export function printed(src) {
