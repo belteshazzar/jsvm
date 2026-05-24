@@ -1,7 +1,7 @@
 // Environment factory for jsvm: creates prototypes and builtins
 import { panic } from './common.js';
 
-export function createDefaultEnv({ onPrint }) {
+export function createDefaultEnv({ onPrint, onUnhandledRejection } = {}) {
   // Prototypes
   const ObjectProto = { type: 'proto', map: Object.create(null), proto: null };
   const StringProto = { type: 'proto', map: Object.create(null), proto: null };
@@ -247,12 +247,8 @@ export function createDefaultEnv({ onPrint }) {
       call: (vm, args) => {
         const p = vm.createPromise();
         const executor = args[0];
-        if (!executor) {
-          vm.promiseReject(p, { type:'str', value:'TypeError: Promise executor is required' });
-          return p;
-        }
-        if (executor.type !== 'native') {
-          vm.promiseReject(p, { type:'str', value:'TypeError: Promise executor currently supports native functions only' });
+        if (!executor || (executor.type !== 'native' && executor.type !== 'func')) {
+          vm.promiseReject(p, { type:'str', value:'TypeError: Promise executor must be callable' });
           return p;
         }
         const resolveFn = {
@@ -270,14 +266,14 @@ export function createDefaultEnv({ onPrint }) {
           }
         };
         try {
-          executor.call(vm, [resolveFn, rejectFn], null);
+          vm.callCallable(executor, [resolveFn, rejectFn], null);
         } catch (err) {
-          vm.promiseReject(p, { type:'str', value: String(err?.message ?? err) });
+          vm.promiseReject(p, { type:'str', value: `TypeError: Promise executor threw: ${String(err?.message ?? err)}` });
         }
         return p;
       },
     },
   };
 
-  return { builtins, ObjectProto, StringProto, NumberProto, ArrayProto, PromiseProto, NumberProtoMethods };
+  return { builtins, ObjectProto, StringProto, NumberProto, ArrayProto, PromiseProto, NumberProtoMethods, onUnhandledRejection };
 }

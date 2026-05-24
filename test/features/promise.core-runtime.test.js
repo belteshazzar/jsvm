@@ -121,3 +121,28 @@ Promise.reject('orig')
 `;
   expect(printed(src)).toEqual(['ferr']);
 });
+
+test('Promise constructor accepts language function executor', () => {
+  const src = `
+function exec(resolve, reject) { resolve(21); }
+Promise(exec).then(print);
+`;
+  expect(printed(src)).toEqual(['21']);
+});
+
+test('Promise constructor rejects non-callable executors with a clear reason', () => {
+  const src = `
+Promise(1).catch(print);
+`;
+  expect(printed(src)).toEqual(['TypeError: Promise executor must be callable']);
+});
+
+test('Promise constructor converts thrown executor errors into rejection reasons', () => {
+  const src = `
+function boom(resolve, reject) { missingName; }
+Promise(boom).catch(print);
+`;
+  expect(printed(src)).toEqual([
+    "TypeError: Promise executor threw: Undefined variable 'missingName' (at 2:45)",
+  ]);
+});

@@ -25,6 +25,13 @@ export default function createVM(bundle, { env: providedEnv, microtaskLimit = 10
   const NumberProtoMethods = env.NumberProtoMethods ?? null;
 
   const builtins = env.builtins ?? {};
+  const onUnhandledRejection = typeof env.onUnhandledRejection === 'function'
+    ? env.onUnhandledRejection
+    : (message) => {
+        if (typeof process !== 'undefined' && process?.stderr?.write) {
+          process.stderr.write(String(message) + '\n');
+        }
+      };
 
   // Boxing helpers moved to env.js; not needed here.
 
@@ -263,6 +270,7 @@ export default function createVM(bundle, { env: providedEnv, microtaskLimit = 10
   const stack = [];
   const callstack = [];
   const microtasks = [];
+  const pendingUnhandledRejections = new Set();
   let drainingMicrotasks = false;
   const globals = Env(null);
   for (const k of Object.keys(builtins)) globals.map[k]=builtins[k];
@@ -287,10 +295,38 @@ export default function createVM(bundle, { env: providedEnv, microtaskLimit = 10
         job();
         ran++;
       }
+      reportUnhandledRejections();
       return ran;
     } finally {
       drainingMicrotasks = false;
     }
+  }
+
+  function formatUnhandledRejection(reason) {
+    return `Unhandled promise rejection: ${toStringV(reason)}`;
+  }
+
+  function reportUnhandledRejections() {
+    for (const promise of Array.from(pendingUnhandledRejections)) {
+      if (!promise || promise.type !== 'promise') {
+        pendingUnhandledRejections.delete(promise);
+        continue;
+      }
+      if (promise.state !== 'rejected' || promise.hasRejectionHandler) {
+        pendingUnhandledRejections.delete(promise);
+        continue;
+      }
+      pendingUnhandledRejections.delete(promise);
+      if (promise.unhandledReported) continue;
+      promise.unhandledReported = true;
+      onUnhandledRejection(formatUnhandledRejection(promise.value), promise);
+    }
+  }
+
+  function markPromiseHandled(promise) {
+    if (!promise || promise.type !== 'promise') return;
+    promise.hasRejectionHandler = true;
+    pendingUnhandledRejections.delete(promise);
   }
 
   function isCallable(v) {
@@ -301,16 +337,17 @@ export default function createVM(bundle, { env: providedEnv, microtaskLimit = 10
     return { type:'str', value: String(err?.message ?? err) };
   }
 
-  function callPromiseHandler(fnValue, args, thisObj = null) {
-    if (!fnValue) throw new Error('Promise reaction callback is missing');
+  function callCallable(fnValue, args, thisObj = null) {
+    if (!fnValue) throw new Error('Callable is missing');
     if (fnValue.type === 'native') {
       return fnValue.call(vm, args, thisObj) ?? { type:'null' };
     }
     if (fnValue.type === 'func') {
+      const baseDepth = callstack.length;
       pushFrame(fnValue, args, thisObj, {});
-      return vm.runMain();
+      return vm.runMain(baseDepth);
     }
-    throw new Error('Promise reaction callback must be callable');
+    throw new Error('Value is not callable');
   }
 
   function isPromise(v) {
@@ -343,6 +380,8 @@ export default function createVM(bundle, { env: providedEnv, microtaskLimit = 10
       value:{ type:'undef' },
       fulfillReactions:[],
       rejectReactions:[],
+      hasRejectionHandler: false,
+      unhandledReported: false,
       proto: PromiseProto,
     };
   }
@@ -354,6 +393,9 @@ export default function createVM(bundle, { env: providedEnv, microtaskLimit = 10
     promise.value = value;
 
     const reactions = state === 'fulfilled' ? promise.fulfillReactions : promise.rejectReactions;
+    if (state === 'rejected' && !promise.hasRejectionHandler) {
+      pendingUnhandledRejections.add(promise);
+    }
     for (const reaction of reactions) {
       enqueueMicrotask(() => runPromiseReaction(reaction, state, value));
     }
@@ -397,7 +439,7 @@ export default function createVM(bundle, { env: providedEnv, microtaskLimit = 10
       }
 
       try {
-        const out = callPromiseHandler(onFinally, [], null);
+        const out = callCallable(onFinally, [], null);
         if (isPromise(out)) {
           const passThrough = {
             type:'native',
@@ -439,7 +481,7 @@ export default function createVM(bundle, { env: providedEnv, microtaskLimit = 10
     }
 
     try {
-      const out = callPromiseHandler(handler, [value], null);
+      const out = callCallable(handler, [value], null);
       resolvePromise(next, out ?? { type:'null' });
     } catch (err) {
       rejectPromise(next, boxError(err));
@@ -454,6 +496,10 @@ export default function createVM(bundle, { env: providedEnv, microtaskLimit = 10
       onFulfilled: isCallable(onFulfilled) ? onFulfilled : null,
       onRejected: isCallable(onRejected) ? onRejected : null,
     };
+
+    if (reaction.onRejected) {
+      markPromiseHandled(promise);
+    }
 
     if (promise.state === 'pending') {
       promise.fulfillReactions.push(reaction);
@@ -472,6 +518,8 @@ export default function createVM(bundle, { env: providedEnv, microtaskLimit = 10
       next,
       onFinally: isCallable(onFinally) ? onFinally : null,
     };
+
+    markPromiseHandled(promise);
 
     if (promise.state === 'pending') {
       promise.fulfillReactions.push(reaction);
@@ -694,13 +742,14 @@ export default function createVM(bundle, { env: providedEnv, microtaskLimit = 10
     promiseReject: rejectPromise,
     promiseThen: thenPromise,
     promiseFinally: finallyPromise,
-    runMain() {
+    callCallable,
+    runMain(stopDepth = 0) {
       if (callstack.length === 0) {
         const main = makeClosure(0, globals);
         pushFrame(main, []);
       }
       while (true) {
-        while (callstack.length>0) {
+        while (callstack.length > stopDepth) {
           const frame = callstack[callstack.length-1];
           try {
           if (frame.resumeRecord) {
@@ -1121,7 +1170,7 @@ export default function createVM(bundle, { env: providedEnv, microtaskLimit = 10
             }
           } catch (err) {
             let rejectedAsync = false;
-            while (callstack.length > 0) {
+            while (callstack.length > stopDepth) {
               const top = callstack[callstack.length - 1];
               cleanupFrameStack(top);
               popFrame();
@@ -1135,6 +1184,10 @@ export default function createVM(bundle, { env: providedEnv, microtaskLimit = 10
             if (rejectedAsync) continue;
             throw err;
           }
+        }
+
+        if (stopDepth > 0) {
+          return stack.pop();
         }
 
         const ran = runMicrotasks();
