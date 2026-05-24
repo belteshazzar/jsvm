@@ -2,7 +2,7 @@
 
 import fs from 'node:fs/promises';
 
-import { run, compileBinary, runBundleBuffer } from '../main.js';
+import { run, compileBinary, runBundleBuffer, decodeBundle } from '../main.js';
 
 function printHelp(exitCode = 0) {
   const msg = `Usage: jsvm [options]
@@ -12,16 +12,19 @@ Runs jsvm (safe JS subset) from stdin or a file.
 Options:
   -f, --file <path>   Read program from file
   --emit-bytecode <path>
-                     Compile program and write bytecode bundle JSON
+                     Compile program and write bytecode bundle
   --run-bytecode <path>
-                     Execute a previously saved bytecode bundle JSON
+                     Execute a previously saved bytecode bundle
+  --describe-bytecode <path>
+                     Describe a bytecode bundle's imports/exports metadata
   -h, --help          Show this help
 
 Examples:
   echo 'print(1+2);' | jsvm
   jsvm --file ./prog.js
-  jsvm --file ./prog.js --emit-bytecode ./prog.bc.json
-  jsvm --run-bytecode ./prog.bc.json
+  jsvm --file ./prog.js --emit-bytecode ./prog.bc
+  jsvm --run-bytecode ./prog.bc
+  jsvm --describe-bytecode ./prog.bc
 `;
   (exitCode === 0 ? process.stdout : process.stderr).write(msg);
   process.exit(exitCode);
@@ -32,6 +35,7 @@ function parseArgs(argv) {
   let filePath = null;
   let emitBytecodePath = null;
   let runBytecodePath = null;
+  let describeBytecodePath = null;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -69,6 +73,17 @@ function parseArgs(argv) {
       continue;
     }
 
+    if (a === '--describe-bytecode') {
+      const p = args[i + 1];
+      if (!p) {
+        process.stderr.write('Missing value for --describe-bytecode\n');
+        printHelp(2);
+      }
+      describeBytecodePath = p;
+      i++;
+      continue;
+    }
+
     process.stderr.write(`Unknown argument: ${a}\n`);
     printHelp(2);
   }
@@ -78,7 +93,69 @@ function parseArgs(argv) {
     printHelp(2);
   }
 
-  return { filePath, emitBytecodePath, runBytecodePath };
+  if (describeBytecodePath && (emitBytecodePath || runBytecodePath || filePath)) {
+    process.stderr.write('Cannot combine --describe-bytecode with --file, --emit-bytecode, or --run-bytecode\n');
+    printHelp(2);
+  }
+
+  return { filePath, emitBytecodePath, runBytecodePath, describeBytecodePath };
+}
+
+function formatSpecs(specifiers, side = 'import') {
+  if (!Array.isArray(specifiers) || specifiers.length === 0) return '(none)';
+  return specifiers
+    .map(spec => {
+      if (side === 'import') {
+        return spec.imported === spec.local
+          ? spec.imported
+          : `${spec.imported} as ${spec.local}`;
+      }
+      return spec.local === spec.exported
+        ? spec.local
+        : `${spec.local} as ${spec.exported}`;
+    })
+    .join(', ');
+}
+
+function printBytecodeDescription(bundle) {
+  process.stdout.write('Bytecode Metadata\n');
+
+  const imports = Array.isArray(bundle.imports) ? bundle.imports : [];
+  process.stdout.write('Imports:\n');
+  if (imports.length === 0) {
+    process.stdout.write('  (none)\n');
+  } else {
+    for (const imp of imports) {
+      process.stdout.write(`  - ${imp.source}: ${formatSpecs(imp.specifiers, 'import')}\n`);
+    }
+  }
+
+  const exportsList = Array.isArray(bundle.exports) ? bundle.exports : [];
+  const hasDefault = bundle.defaultExport !== undefined && bundle.defaultExport !== null;
+  const reExports = Array.isArray(bundle.reExports) ? bundle.reExports : [];
+
+  process.stdout.write('Exports:\n');
+  if (exportsList.length === 0 && !hasDefault && reExports.length === 0) {
+    process.stdout.write('  (none)\n');
+    return;
+  }
+
+  if (exportsList.length > 0) {
+    for (const exp of exportsList) {
+      const rendered = exp.local === exp.exported ? exp.local : `${exp.local} as ${exp.exported}`;
+      process.stdout.write(`  - ${rendered}\n`);
+    }
+  }
+
+  if (hasDefault) {
+    process.stdout.write('  - default\n');
+  }
+
+  if (reExports.length > 0) {
+    for (const reExp of reExports) {
+      process.stdout.write(`  - from ${reExp.source}: ${formatSpecs(reExp.specifiers, 'export')}\n`);
+    }
+  }
 }
 
 async function readStdin() {
@@ -92,7 +169,14 @@ async function readStdin() {
 }
 
 async function main() {
-  const { filePath, emitBytecodePath, runBytecodePath } = parseArgs(process.argv);
+  const { filePath, emitBytecodePath, runBytecodePath, describeBytecodePath } = parseArgs(process.argv);
+
+  if (describeBytecodePath) {
+    const buf = await fs.readFile(describeBytecodePath);
+    const bundle = decodeBundle(buf);
+    printBytecodeDescription(bundle);
+    return;
+  }
 
   if (runBytecodePath) {
     const buf = await fs.readFile(runBytecodePath);

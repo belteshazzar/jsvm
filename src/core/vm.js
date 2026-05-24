@@ -36,6 +36,7 @@ export default function createVM(bundle, { env: providedEnv, microtaskLimit = 10
   
   // Module cache per VM instance
   const moduleCache = Object.create(null);
+  let lastModuleExports = null; // Cache the module exports if any
 
   function hydrateConst(v) {
     if (!v) return v;
@@ -1327,7 +1328,30 @@ export default function createVM(bundle, { env: providedEnv, microtaskLimit = 10
         // Continue if there's still work: more on call stack, more timers pending, or microtasks ran
         if (callstack.length === 0 && ranMicrotasks === 0 && ranTimers === 0 && timers.length === 0) break;
       }
-      return stack.pop();
+      const result = stack.pop();
+      
+      // If module has exports, the result is the __exports object
+      const hasNamedExports = Array.isArray(bundle?.exports) && bundle.exports.length > 0;
+      const hasDefaultExport = bundle?.defaultExport !== undefined && bundle.defaultExport !== null;
+      const hasReExports = Array.isArray(bundle?.reExports) && bundle.reExports.length > 0;
+      
+      if (hasNamedExports || hasDefaultExport || hasReExports) {
+        lastModuleExports = result;
+      }
+      
+      return result;
+    },
+    getExports() {
+      // Return the cached exports object from runMain
+      // (When exports exist, runMain returns the __exports object directly)
+      const hasNamedExports = Array.isArray(bundle?.exports) && bundle.exports.length > 0;
+      const hasDefaultExport = bundle?.defaultExport !== undefined && bundle.defaultExport !== null;
+      const hasReExports = Array.isArray(bundle?.reExports) && bundle.reExports.length > 0;
+      
+      if (!hasNamedExports && !hasDefaultExport && !hasReExports) {
+        return null;
+      }
+      return lastModuleExports ?? null;
     },
   };
 

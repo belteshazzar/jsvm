@@ -1,3 +1,4 @@
+
 import { panic } from './common.js';
 
 export default function parse(tokens) {
@@ -39,7 +40,6 @@ export default function parse(tokens) {
 
   function stmt() {
     if (at('IMPORT')) return importDecl();
-    if (at('EXPORT')) return exportDecl();
     if (at('LET')) return varDecl();
     if (at('CONST')) return constDecl();
     if (at('IF')) return ifStmt();
@@ -56,156 +56,6 @@ export default function parse(tokens) {
     const e = expr();
     expect('SEMI', "Expected ';' after expression");
     return { type:'ExprStmt', expr:e };
-  }
-
-  function importDecl() {
-    const start = next(); // IMPORT
-    const specifiers = [];
-    if (at('LBRACE')) {
-      next(); // {
-      if (!at('RBRACE')) {
-        do {
-          const nameTok = expect('IDENT', 'Expected imported name');
-          let alias = nameTok.value;
-          // Check for 'as' keyword for renaming
-          if (at('AS')) {
-            next(); // consume AS
-            const aliasTok = expect('IDENT', 'Expected alias name after as');
-            alias = aliasTok.value;
-          }
-          specifiers.push({ imported: nameTok.value, local: alias });
-        } while (at('COMMA') && next());
-      }
-      expect('RBRACE', "Expected '}' after imports");
-    } else {
-      panic('Default imports not yet supported', start);
-    }
-    expect('FROM', "Expected 'from'");
-    const sourceTok = expect('STRING', 'Expected module source string');
-    expect('SEMI', "Expected ';' after import");
-    return { type: 'ImportDeclaration', specifiers, source: sourceTok.value, loc: locFrom(start) };
-  }
-
-  function exportDecl() {
-    const start = next(); // EXPORT
-    
-    // export default expr
-    if (at('DEFAULT')) {
-      next(); // DEFAULT
-      const value = expr();
-      expect('SEMI', "Expected ';' after export default");
-      return { type: 'ExportDefaultDeclaration', value, loc: locFrom(start) };
-    }
-    
-    // export { name as alias, ... } [from '...']
-    if (at('LBRACE')) {
-      next(); // {
-      const specifiers = [];
-      if (!at('RBRACE')) {
-        do {
-          const nameTok = expect('IDENT', 'Expected export name');
-          let alias = nameTok.value;
-          // Check for 'as' keyword for renaming
-          if (at('AS')) {
-            next(); // consume AS
-            const aliasTok = expect('IDENT', 'Expected alias name after as');
-            alias = aliasTok.value;
-          }
-          specifiers.push({ local: nameTok.value, exported: alias });
-        } while (at('COMMA') && next());
-      }
-      expect('RBRACE', "Expected '}' after exports");
-      
-      // Check for re-export (from clause)
-      if (at('FROM')) {
-        next(); // FROM
-        const sourceTok = expect('STRING', 'Expected module source string');
-        expect('SEMI', "Expected ';' after re-export");
-        return { type: 'ExportNamedFromDeclaration', specifiers, source: sourceTok.value, loc: locFrom(start) };
-      }
-      
-      expect('SEMI', "Expected ';' after export");
-      return { type: 'ExportNamedDeclaration', specifiers, loc: locFrom(start) };
-    }
-    
-    // export function ...
-    if (at('FUNCTION')) {
-      const funcToken = next(); // FUNCTION
-      const nameTok = expect('IDENT', "Expected function name");
-      expect('LPAREN', "Expected '(' after function");
-      const params = [];
-      if (!at('RPAREN')) {
-        do { params.push(expect('IDENT', "Expected parameter name").value); } while (at('COMMA') && next());
-      }
-      expect('RPAREN', "Expected ')' after parameters");
-      const body = block();
-      const funcDecl = { type:'FuncDecl', name: nameTok.value, params, body, loc: locFrom(funcToken) };
-      return { type: 'ExportFunctionDeclaration', declaration: funcDecl, loc: locFrom(start) };
-    }
-    
-    // export class ...
-    if (at('CLASS')) {
-      const classToken = next(); // CLASS
-      const nameTok = expect('IDENT', "Expected class name");
-      let superName = null;
-      if (at('EXTENDS')) {
-        next();
-        superName = expect('IDENT', "Expected superclass name").value;
-      }
-      expect('LBRACE', "Expected '{' after class");
-      let ctor = null;
-      const methods = [];
-      while (!at('RBRACE')) {
-        if (at('IDENT') && peek().value === 'constructor') {
-          const ctorTok = next();
-          expect('LPAREN', "Expected '(' after constructor");
-          const params = [];
-          if (!at('RPAREN')) {
-            do { params.push(expect('IDENT', "Expected parameter name").value); } while (at('COMMA') && next());
-          }
-          expect('RPAREN', "Expected ')' after parameters");
-          const body = block();
-          ctor = { type:'Method', name:'constructor', params, body, loc: locFrom(ctorTok) };
-        } else {
-          const methodToken = expect('IDENT', "Expected method name");
-          expect('LPAREN', "Expected '(' after method");
-          const params = [];
-          if (!at('RPAREN')) {
-            do { params.push(expect('IDENT', "Expected parameter name").value); } while (at('COMMA') && next());
-          }
-          expect('RPAREN', "Expected ')' after parameters");
-          const body = block();
-          methods.push({ type:'Method', name: methodToken.value, params, body, loc: locFrom(methodToken) });
-        }
-      }
-      expect('RBRACE', "Expected '}' after class");
-      const classDecl = { type:'ClassDecl', name: nameTok.value, superName, ctor, methods, loc: locFrom(classToken) };
-      return { type: 'ExportClassDeclaration', declaration: classDecl, loc: locFrom(start) };
-    }
-    
-    // export const ...
-    if (at('CONST')) {
-      const Start = next(); // CONST
-      const nameTok = expect('IDENT', "Expected variable name");
-      expect('EQUAL', "Expected '=' in const declaration");
-      const init = expr();
-      expect('SEMI', "Expected ';' after const declaration");
-      const constDecl = { type:'ConstDecl', name: nameTok.value, init, loc: locFrom(Start) };
-      return { type: 'ExportConstDeclaration', declaration: constDecl, loc: locFrom(start) };
-    }
-    
-    // export let ...
-    if (at('LET')) {
-      const Start = next(); // LET
-      const nameTok = expect('IDENT', "Expected variable name");
-      let init = null;
-      if (at('EQUAL')) { next(); init = expr(); }
-      expect('SEMI', "Expected ';' after variable declaration");
-      const varDecl = { type:'VarDecl', name: nameTok.value, init, loc: locFrom(Start) };
-      return { type: 'ExportVarDeclaration', declaration: varDecl, loc: locFrom(start) };
-    }
-    
-    panic('Invalid export syntax', start);
   }
 
   function asyncFuncDecl() {
@@ -242,6 +92,38 @@ export default function parse(tokens) {
     if (at('EQUAL')) { next(); init = expr(); }
     expect('SEMI', "Expected ';' after variable declaration");
     return { type:'VarDecl', name: nameTok.value, init, loc: locFrom(start) };
+  }
+
+  function importDecl() {
+    const start = next(); // IMPORT
+    expect('LBRACE', "Expected '{' after import");
+    const specifiers = [];
+    while (!at('RBRACE')) {
+      const importedTok = expect('IDENT', "Expected imported name");
+      let local = importedTok.value;
+      if (at('AS')) {
+        next();
+        const localTok = expect('IDENT', "Expected local name after 'as'");
+        local = localTok.value;
+      }
+      specifiers.push({
+        imported: importedTok.value,
+        local: local
+      });
+      if (!at('RBRACE')) {
+        expect('COMMA', "Expected ',' after import specifier");
+      }
+    }
+    expect('RBRACE', "Expected '}' after import specifiers");
+    expect('FROM', "Expected 'from' after import specifiers");
+    const sourceTok = expect('STRING', "Expected module source path");
+    expect('SEMI', "Expected ';' after import declaration");
+    return {
+      type: 'ImportDeclaration',
+      source: sourceTok.value,
+      specifiers: specifiers,
+      loc: locFrom(start)
+    };
   }
 
   function switchStmt() {

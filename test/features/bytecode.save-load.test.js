@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { compileBinary, runBundleBuffer } from '../../main.js';
+import { decodeBundle } from '../../src/bytecode/io.js';
 import { printed } from '../helpers/run.js';
 
 test('bytecode: compile->save->load->run produces same output', async () => {
@@ -71,4 +72,48 @@ test('bytecode: async/await functions preserved through encode/decode', async ()
   await runBundleBuffer(loadedBuf, { onPrint: s => out.push(s) });
 
   expect(out).toEqual(expected);
+});
+
+test('bytecode: module metadata preserved through encode/decode', () => {
+  const src = `
+    import { x as y } from './dep.js';
+    export { y as namedY };
+    export default 42;
+    export { z as namedZ } from './other.js';
+  `;
+
+  const decoded = decodeBundle(compileBinary(src));
+
+  expect(decoded.imports).toEqual([
+    {
+      source: './dep.js',
+      specifiers: [{ imported: 'x', local: 'y' }],
+    },
+  ]);
+  expect(decoded.exports).toEqual([{ exported: 'namedY', local: 'y' }]);
+  expect(decoded.defaultExport).toMatchObject({ type: 'Literal', value: 42 });
+  expect(decoded.reExports).toEqual([
+    {
+      source: './other.js',
+      specifiers: [{ local: 'z', exported: 'namedZ' }],
+    },
+  ]);
+});
+
+test('bytecode: import instructions run correctly after binary roundtrip', async () => {
+  const src = `
+    import { foo as localFoo } from './dep.js';
+    print(localFoo);
+  `;
+
+  const out = [];
+  runBundleBuffer(compileBinary(src), {
+    onPrint: s => out.push(s),
+    requestImport: (modulePath) => {
+      if (modulePath === './dep.js') return { foo: 123 };
+      throw new Error('Unexpected module path');
+    },
+  });
+
+  expect(out).toEqual(['123']);
 });

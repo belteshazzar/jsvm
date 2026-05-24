@@ -5,10 +5,7 @@ export default function compile(ast) {
   const consts = [];
   const functions = [];
   const classes = []; // meta: {name, superName, ctorIndex, methods:[{name, funcIndex}]}
-  const imports = []; // Track imports: { source, specifiers: [{imported, local}] }
-  const exports = []; // Track named exports: { exported: name, local: name }
-  let defaultExport = null; // Track default export value (if any)
-  const reExports = []; // Track re-exports: { source, specifiers }
+  const imports = []; // meta: {source, specifiers: [{imported, local}]}
 
   const bytecodeVersion = 1;
 
@@ -82,60 +79,14 @@ export default function compile(ast) {
   withFunctionContext({ async: false, name: '(main)' }, () => {
     compileBlockLike(main, ast.body);
   });
-  
-  // Build __exports object if module has exports, re-exports, or default export
-  const hasNamedExports = exports.length > 0;
-  const hasReExports = reExports.length > 0;
-  const hasDefaultExport = defaultExport !== null;
-  
-  if (hasNamedExports || hasReExports || hasDefaultExport) {
-    emit(main, 'MAKE_OBJ');
-    
-    // Add named exports
-    for (const exp of exports) {
-      emit(main, 'DUP');
-      emit(main, 'CONST', constIndex({ type: 'str', value: exp.exported }));
-      emit(main, 'LOAD_NAME', exp.local);
-      emit(main, 'SET_PROP');
-      emit(main, 'POP');
-    }
-    
-    // Add re-exported values
-    for (const reExp of reExports) {
-      // Import the module
-      emit(main, 'IMPORT', constIndex({ type: 'str', value: reExp.source }), constIndex({ type: 'arr', items: reExp.specifiers.map(spec => ({ type: 'obj', map: { imported: { type: 'str', value: spec.local }, local: { type: 'str', value: spec.local } } })) }));
-      // Add each re-exported item to __exports
-      for (const spec of reExp.specifiers) {
-        emit(main, 'DUP');
-        emit(main, 'CONST', constIndex({ type: 'str', value: spec.exported }));
-        // Stack: __exports, key, imported_value (from IMPORT)
-        // We need to extract the value for this spec
-        emit(main, 'LOAD_NAME', spec.local);
-        emit(main, 'SET_PROP');
-        emit(main, 'POP');
-      }
-    }
-    
-    // Add default export if present
-    if (hasDefaultExport) {
-      emit(main, 'DUP');
-      emit(main, 'CONST', constIndex({ type: 'str', value: 'default' }));
-      compileExpr(main, defaultExport);
-      emit(main, 'SET_PROP');
-      emit(main, 'POP');
-    }
-    
-    emit(main, 'RET');
-  } else {
-    // Only emit CONST null if the last statement is not an ExprStmt
-    const lastStmt = ast.body[ast.body.length - 1];
-    if (!lastStmt || lastStmt.type !== 'ExprStmt') {
-      emit(main, 'CONST', constIndex({type:'null'}));
-    }
-    emit(main, 'RET');
+  // Only emit CONST null if the last statement is not an ExprStmt
+  const lastStmt = ast.body[ast.body.length - 1];
+  if (!lastStmt || lastStmt.type !== 'ExprStmt') {
+    emit(main, 'CONST', constIndex({type:'null'}));
   }
+  emit(main, 'RET');
 
-  return { bytecodeVersion, consts, functions, classes, imports, exports, defaultExport, reExports };
+  return { bytecodeVersion, consts, functions, classes, imports };
 
   function compileBlockLike(fn, stmts) {
     for (let i = 0; i < stmts.length; i++) {
@@ -148,52 +99,6 @@ export default function compile(ast) {
   function compileStmt(fn, s, isLast = false) {
     if (s?.loc) currentLoc = s.loc;
     switch (s.type) {
-      case 'ImportDeclaration':
-        imports.push({
-          source: s.source,
-          specifiers: s.specifiers.map(spec => ({ imported: spec.imported, local: spec.local })),
-        });
-        // Emit IMPORT instruction with source name and specifier list
-        emit(fn, 'IMPORT', constIndex({ type: 'str', value: s.source }), constIndex({ type: 'arr', items: s.specifiers.map(spec => ({ type: 'obj', map: { imported: { type: 'str', value: spec.imported }, local: { type: 'str', value: spec.local } } })) }));
-        // Specifiers are bound in the current scope
-        for (const spec of s.specifiers) {
-          emit(fn, 'DEFINE_NAME', spec.local);
-        }
-        break;
-      case 'ExportNamedDeclaration':
-        // Track exports for module metadata
-        for (const spec of s.specifiers) {
-          exports.push({ exported: spec.exported, local: spec.local });
-        }
-        break;
-      case 'ExportDefaultDeclaration':
-        // Track default export
-        defaultExport = s.value;
-        break;
-      case 'ExportNamedFromDeclaration':
-        // Re-exports: import { x } from '...' and add to exports
-        reExports.push({ source: s.source, specifiers: s.specifiers });
-        break;
-      case 'ExportFunctionDeclaration':
-        // export function f() {}
-        compileStmt(fn, s.declaration);
-        exports.push({ exported: s.declaration.name, local: s.declaration.name });
-        break;
-      case 'ExportClassDeclaration':
-        // export class C {}
-        compileStmt(fn, s.declaration);
-        exports.push({ exported: s.declaration.name, local: s.declaration.name });
-        break;
-      case 'ExportConstDeclaration':
-        // export const x = value;
-        compileStmt(fn, s.declaration);
-        exports.push({ exported: s.declaration.name, local: s.declaration.name });
-        break;
-      case 'ExportVarDeclaration':
-        // export let x = value;
-        compileStmt(fn, s.declaration);
-        exports.push({ exported: s.declaration.name, local: s.declaration.name });
-        break;
       case 'VarDecl':
         if (s.init) compileExpr(fn, s.init); else emit(fn,'CONST',constIndex({type:'null'}));
         emit(fn,'DEFINE_NAME',s.name);
@@ -465,6 +370,24 @@ export default function compile(ast) {
         emit(fn,'DEFINE_NAME', s.name);
         break;
       }
+      case 'ImportDeclaration':
+        // Track import metadata in the bundle header
+        const importEntry = {
+          source: s.source,
+          specifiers: s.specifiers.map(sp => ({
+            imported: sp.imported,
+            local: sp.local
+          }))
+        };
+        imports.push(importEntry);
+        // Emit IMPORT instruction for runtime handling
+        emit(fn, 'IMPORT', constIndex({ type: 'str', value: s.source }), s.specifiers.length);
+        for (const spec of s.specifiers) {
+          emit(fn, 'CONST', constIndex({ type: 'str', value: spec.imported }));
+          emit(fn, 'DEFINE_NAME', spec.local);
+          emit(fn, 'POP');
+        }
+        break;
       case 'Return':
         if (s.value) compileExpr(fn, s.value); else emit(fn,'CONST',constIndex({type:'null'}));
         emit(fn,'RET'); break;

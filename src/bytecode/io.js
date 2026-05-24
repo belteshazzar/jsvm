@@ -17,6 +17,10 @@ import { panic } from '../core/common.js';
 //   1 CONSTS
 //   2 FUNCTIONS
 //   3 CLASSES
+//   4 IMPORTS
+//   5 EXPORTS
+//   6 DEFAULT_EXPORT
+//   7 REEXPORTS
 
 const MAGIC = Buffer.from('JSVB');
 const VERSION = 1;
@@ -24,6 +28,10 @@ const VERSION = 1;
 const TAG_CONSTS = 1;
 const TAG_FUNCTIONS = 2;
 const TAG_CLASSES = 3;
+const TAG_IMPORTS = 4;
+const TAG_EXPORTS = 5;
+const TAG_DEFAULT_EXPORT = 6;
+const TAG_REEXPORTS = 7;
 
 // Const tags
 const C_NULL = 0;
@@ -34,6 +42,8 @@ const C_STR = 4;
 const C_FUNC = 5;
 const C_NATIVE = 6;
 const C_PROTO = 7;
+const C_ARR = 8;
+const C_OBJ = 9;
 
 // Loc is stored as u32 line, u32 col (0/0 means missing)
 
@@ -135,90 +145,221 @@ class Reader {
   }
 }
 
+function encodeConstValue(w, c) {
+  switch (c?.type) {
+    case 'null':
+      w.u8(C_NULL);
+      break;
+    case 'undef':
+      w.u8(C_UNDEF);
+      break;
+    case 'bool':
+      w.u8(C_BOOL);
+      w.u8(c.value ? 1 : 0);
+      break;
+    case 'num':
+      w.u8(C_NUM);
+      w.f64(c.value);
+      break;
+    case 'str':
+      w.u8(C_STR);
+      w.str(c.value);
+      break;
+    case 'func':
+      // User functions are runtime closures (captured env), not serializable.
+      // Encode by function index so VM can recreate a closure in the right environment.
+      w.u8(C_FUNC);
+      w.u32(c.funcIndex >>> 0);
+      break;
+    case 'native':
+      // Natives are rehydrated by name at runtime.
+      w.u8(C_NATIVE);
+      w.str(c.name);
+      break;
+    case 'proto':
+      // Prototypes are runtime objects; they are rehydrated as placeholders.
+      w.u8(C_PROTO);
+      break;
+    case 'arr': {
+      w.u8(C_ARR);
+      const items = Array.isArray(c.items) ? c.items : [];
+      w.u32(items.length);
+      for (const item of items) encodeConstValue(w, item);
+      break;
+    }
+    case 'obj': {
+      w.u8(C_OBJ);
+      const map = c.map ?? Object.create(null);
+      const keys = Object.keys(map);
+      w.u32(keys.length);
+      for (const k of keys) {
+        w.str(k);
+        encodeConstValue(w, map[k]);
+      }
+      break;
+    }
+    default:
+      panic('Unsupported const type in encoder: ' + String(c?.type));
+  }
+}
+
 function encodeConsts(consts) {
   const w = new Writer();
   w.u32(consts.length);
   for (const c of consts) {
-    switch (c.type) {
-      case 'null':
-        w.u8(C_NULL);
-        break;
-      case 'undef':
-        w.u8(C_UNDEF);
-        break;
-      case 'bool':
-        w.u8(C_BOOL);
-        w.u8(c.value ? 1 : 0);
-        break;
-      case 'num':
-        w.u8(C_NUM);
-        w.f64(c.value);
-        break;
-      case 'str':
-        w.u8(C_STR);
-        w.str(c.value);
-        break;
-      case 'func':
-        // User functions are runtime closures (captured env), not serializable.
-        // Encode by function index so VM can recreate a closure in the right environment.
-        // Payload: u32 funcIndex
-        w.u8(C_FUNC);
-        w.u32(c.funcIndex >>> 0);
-        break;
-      case 'native':
-        // Natives are rehydrated by name at runtime.
-        // Payload: native name string.
-        w.u8(C_NATIVE);
-        w.str(c.name);
-        break;
-      case 'proto':
-        // Prototypes are runtime objects; they are rehydrated as placeholders.
-        // Payload: none
-        w.u8(C_PROTO);
-        break;
-      default:
-        panic('Unsupported const type in encoder: ' + c.type);
-    }
+    encodeConstValue(w, c);
   }
   return w.finish();
+}
+
+function decodeConstValue(r) {
+  const tag = r.u8();
+  switch (tag) {
+    case C_NULL:
+      return { type: 'null' };
+    case C_UNDEF:
+      return { type: 'undef' };
+    case C_BOOL:
+      return { type: 'bool', value: r.u8() === 1 };
+    case C_NUM:
+      return { type: 'num', value: r.f64() };
+    case C_STR:
+      return { type: 'str', value: r.str() };
+    case C_FUNC:
+      // Stored as function index; VM will rehydrate to a closure at runtime.
+      return { type: 'func', funcIndex: r.u32(), name: null, env: null };
+    case C_NATIVE:
+      return { type: 'native', name: r.str(), arity: null, call: null };
+    case C_PROTO:
+      return { type: 'proto', map: Object.create(null), proto: null };
+    case C_ARR: {
+      const count = r.u32();
+      const items = [];
+      for (let i = 0; i < count; i++) items.push(decodeConstValue(r));
+      return { type: 'arr', items };
+    }
+    case C_OBJ: {
+      const count = r.u32();
+      const map = Object.create(null);
+      for (let i = 0; i < count; i++) {
+        const key = r.str();
+        map[key] = decodeConstValue(r);
+      }
+      return { type: 'obj', map, proto: null };
+    }
+    default:
+      panic('Unsupported const tag in decoder: ' + String(tag));
+  }
 }
 
 function decodeConsts(r) {
   const n = r.u32();
   const consts = [];
   for (let i = 0; i < n; i++) {
-    const tag = r.u8();
-    switch (tag) {
-      case C_NULL:
-        consts.push({ type: 'null' });
-        break;
-      case C_UNDEF:
-        consts.push({ type: 'undef' });
-        break;
-      case C_BOOL:
-        consts.push({ type: 'bool', value: r.u8() === 1 });
-        break;
-      case C_NUM:
-        consts.push({ type: 'num', value: r.f64() });
-        break;
-      case C_STR:
-        consts.push({ type: 'str', value: r.str() });
-        break;
-      case C_FUNC:
-        // Stored as function index; VM will rehydrate to a closure at runtime.
-        consts.push({ type: 'func', funcIndex: r.u32(), name: null, env: null });
-        break;
-      case C_NATIVE:
-        consts.push({ type: 'native', name: r.str(), arity: null, call: null });
-        break;
-      case C_PROTO:
-        consts.push({ type: 'proto', map: Object.create(null), proto: null });
-        break;
-      default:
-        panic('Unsupported const tag in decoder: ' + String(tag));
-    }
+    consts.push(decodeConstValue(r));
   }
   return consts;
+}
+
+function encodeImports(imports) {
+  const w = new Writer();
+  w.u32(imports.length);
+  for (const imp of imports) {
+    w.str(imp.source ?? '');
+    const specs = Array.isArray(imp.specifiers) ? imp.specifiers : [];
+    w.u32(specs.length);
+    for (const spec of specs) {
+      w.str(spec.imported ?? '');
+      w.str(spec.local ?? '');
+    }
+  }
+  return w.finish();
+}
+
+function decodeImports(r) {
+  const n = r.u32();
+  const imports = [];
+  for (let i = 0; i < n; i++) {
+    const source = r.str();
+    const specCount = r.u32();
+    const specifiers = [];
+    for (let j = 0; j < specCount; j++) {
+      specifiers.push({ imported: r.str(), local: r.str() });
+    }
+    imports.push({ source, specifiers });
+  }
+  return imports;
+}
+
+function encodeExports(exportsList) {
+  const w = new Writer();
+  w.u32(exportsList.length);
+  for (const exp of exportsList) {
+    w.str(exp.exported ?? '');
+    w.str(exp.local ?? '');
+  }
+  return w.finish();
+}
+
+function decodeExports(r) {
+  const n = r.u32();
+  const exportsList = [];
+  for (let i = 0; i < n; i++) {
+    exportsList.push({ exported: r.str(), local: r.str() });
+  }
+  return exportsList;
+}
+
+function encodeDefaultExport(defaultExport) {
+  const w = new Writer();
+  if (defaultExport == null) {
+    w.u8(0);
+  } else {
+    w.u8(1);
+    w.str(JSON.stringify(defaultExport));
+  }
+  return w.finish();
+}
+
+function decodeDefaultExport(r) {
+  const hasDefault = r.u8() === 1;
+  if (!hasDefault) return null;
+  const raw = r.str();
+  try {
+    return JSON.parse(raw);
+  } catch {
+    panic('Malformed bundle: invalid default export payload');
+  }
+}
+
+function encodeReExports(reExports) {
+  const w = new Writer();
+  w.u32(reExports.length);
+  for (const reExp of reExports) {
+    w.str(reExp.source ?? '');
+    const specs = Array.isArray(reExp.specifiers) ? reExp.specifiers : [];
+    w.u32(specs.length);
+    for (const spec of specs) {
+      w.str(spec.local ?? '');
+      w.str(spec.exported ?? '');
+    }
+  }
+  return w.finish();
+}
+
+function decodeReExports(r) {
+  const n = r.u32();
+  const reExports = [];
+  for (let i = 0; i < n; i++) {
+    const source = r.str();
+    const specCount = r.u32();
+    const specifiers = [];
+    for (let j = 0; j < specCount; j++) {
+      specifiers.push({ local: r.str(), exported: r.str() });
+    }
+    reExports.push({ source, specifiers });
+  }
+  return reExports;
 }
 
 function encodeFunctions(functions) {
@@ -379,10 +520,18 @@ export function encodeBundle(bundle) {
   const consts = bundle.consts ?? [];
   const functions = bundle.functions ?? [];
   const classes = bundle.classes ?? [];
+  const imports = bundle.imports ?? [];
+  const exportsList = bundle.exports ?? [];
+  const defaultExport = bundle.defaultExport ?? null;
+  const reExports = bundle.reExports ?? [];
 
   w.bytes(encodeChunk(TAG_CONSTS, encodeConsts(consts)));
   w.bytes(encodeChunk(TAG_FUNCTIONS, encodeFunctions(functions)));
   w.bytes(encodeChunk(TAG_CLASSES, encodeClasses(classes)));
+  w.bytes(encodeChunk(TAG_IMPORTS, encodeImports(imports)));
+  w.bytes(encodeChunk(TAG_EXPORTS, encodeExports(exportsList)));
+  w.bytes(encodeChunk(TAG_DEFAULT_EXPORT, encodeDefaultExport(defaultExport)));
+  w.bytes(encodeChunk(TAG_REEXPORTS, encodeReExports(reExports)));
 
   return w.finish();
 }
@@ -398,6 +547,10 @@ export function decodeBundle(buf) {
   let consts = null;
   let functions = null;
   let classes = null;
+  let imports = [];
+  let exportsList = [];
+  let defaultExport = null;
+  let reExports = [];
 
   while (r.off < r.buf.length) {
     const tag = r.u32();
@@ -407,6 +560,10 @@ export function decodeBundle(buf) {
     if (tag === TAG_CONSTS) consts = decodeConsts(rr);
     else if (tag === TAG_FUNCTIONS) functions = decodeFunctions(rr);
     else if (tag === TAG_CLASSES) classes = decodeClasses(rr);
+    else if (tag === TAG_IMPORTS) imports = decodeImports(rr);
+    else if (tag === TAG_EXPORTS) exportsList = decodeExports(rr);
+    else if (tag === TAG_DEFAULT_EXPORT) defaultExport = decodeDefaultExport(rr);
+    else if (tag === TAG_REEXPORTS) reExports = decodeReExports(rr);
     else {
       // Unknown chunk tag: skip for forward compatibility.
     }
@@ -416,5 +573,14 @@ export function decodeBundle(buf) {
   if (!functions) panic('Malformed bundle: missing FUNCTIONS chunk');
   if (!classes) panic('Malformed bundle: missing CLASSES chunk');
 
-  return { bytecodeVersion: 1, consts, functions, classes };
+  return {
+    bytecodeVersion: 1,
+    consts,
+    functions,
+    classes,
+    imports,
+    exports: exportsList,
+    defaultExport,
+    reExports,
+  };
 }

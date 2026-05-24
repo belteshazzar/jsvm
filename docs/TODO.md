@@ -71,8 +71,13 @@ Non-goals (intentionally omitted from the subset):
 - [x] Explicit denylist tests: ensure `eval`, `Function`, `globalThis`, `process` cannot be referenced
 - [ ] Confirm `Object.create(null)` is preserved for VM objects (no prototype pollution)
 
-### Import (from allowed list)
+### Module system
+- [x] `export { name1 as alias1, ... }` named exports — tests: `test/features/modules.export.test.js`
+- [x] `export default expr` default exports — tests: `test/features/modules.export-advanced.test.js`
+- [x] `export function/class/var/const` inline export declarations — tests: `test/features/modules.export-advanced.test.js`
+- [x] Re-exports: `export { x } from '...'` — tests: `test/features/modules.export-advanced.test.js`
 - [ ] `import` for known packages that are whitelisted in the VM
+- [ ] Cross-module exports/imports between jsvm modules (currently only host-to-jsvm imports work)
 
 ---
 
