@@ -17,6 +17,24 @@ npm test
 
 The VM accepts a compiled bytecode bundle and an optional environment object. The environment provides prototypes, builtins (like `print`, `Math`, `JSON`), and number methods.
 
+### Builtins (default environment)
+
+The default environment currently includes:
+
+- `print(value)`
+- `console.log/info/warn/error(...)`
+- `Math` (curated numeric methods)
+- `JSON.parse` / `JSON.stringify`
+- `Promise` (core subset)
+- `setTimeout(callback, delayMs)`
+
+`setTimeout` behavior in `jsvm`:
+
+- Schedules `callback` to run after `delayMs` (clamped to a non-negative integer).
+- Lower delays run before higher delays.
+- Returns a numeric timer id.
+- `clearTimeout` is not implemented yet.
+
 **With default environment** (standard builtins):
 
 ```javascript
