@@ -41,6 +41,17 @@ Conventions:
 - `JMP_IF_FALSE a`: if top is falsy, set `ip = a` (does not pop).
 - `JMP_IF_TRUE a`: if top is truthy, set `ip = a` (does not pop).
 
+### Iteration helpers
+
+- `ITER_INIT_IN`: pop receiver, push iterator over enumerable keys.
+  - Stack: `(..., recv) -> (..., iter)`
+- `ITER_INIT_OF`: pop receiver, push iterator over values.
+  - Stack: `(..., recv) -> (..., iter)`
+- `ITER_HAS_NEXT`: peek iterator, push `bool` whether another element exists.
+  - Stack: `(..., iter) -> (..., iter, bool)`
+- `ITER_GET_NEXT`: peek iterator, push next element and advance cursor.
+  - Stack: `(..., iter) -> (..., iter, value)`
+
 ## Unary
 
 - `NOT`: logical not.

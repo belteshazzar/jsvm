@@ -40,6 +40,22 @@ export default function compile(ast) {
     }
   function patch(fn, idx, aNew) { fn.code[idx].a = aNew; }
 
+  const controlStack = [];
+  function nearestBreakTarget() {
+    for (let i = controlStack.length - 1; i >= 0; i--) {
+      const c = controlStack[i];
+      if (c.kind === 'loop' || c.kind === 'switch') return c;
+    }
+    return null;
+  }
+  function nearestLoopTarget() {
+    for (let i = controlStack.length - 1; i >= 0; i--) {
+      const c = controlStack[i];
+      if (c.kind === 'loop') return c;
+    }
+    return null;
+  }
+
   const main = newFunc('(main)', []);
   compileBlockLike(main, ast.body);
   // Only emit CONST null if the last statement is not an ExprStmt
@@ -100,10 +116,109 @@ export default function compile(ast) {
         compileExpr(fn, s.cond);
         const jfalse = emit(fn,'JMP_IF_FALSE',null);
         emit(fn,'POP');
+
+        const loopCtx = { kind:'loop', breakJumps:[], continueJumps:[] };
+        controlStack.push(loopCtx);
         compileStmt(fn, s.body);
+
+        for (const j of loopCtx.continueJumps) patch(fn, j, start);
         emit(fn,'JMP', start);
-        patch(fn, jfalse, fn.code.length);
+
+        const falsePath = fn.code.length;
+        patch(fn, jfalse, falsePath);
         emit(fn,'POP');
+
+        const end = fn.code.length;
+        for (const j of loopCtx.breakJumps) patch(fn, j, end);
+        controlStack.pop();
+        break;
+      }
+      case 'For': {
+        if (s.init) {
+          if (s.init.type === 'VarDecl' || s.init.type === 'ConstDecl') {
+            compileStmt(fn, s.init);
+          } else {
+            compileExpr(fn, s.init);
+            emit(fn, 'POP');
+          }
+        }
+
+        const condStart = fn.code.length;
+        let jfalse = null;
+        if (s.cond) {
+          compileExpr(fn, s.cond);
+          jfalse = emit(fn, 'JMP_IF_FALSE', null);
+          emit(fn, 'POP');
+        }
+
+        const loopCtx = { kind:'loop', breakJumps:[], continueJumps:[] };
+        controlStack.push(loopCtx);
+        compileStmt(fn, s.body);
+
+        const postStart = fn.code.length;
+        for (const j of loopCtx.continueJumps) patch(fn, j, postStart);
+        if (s.post) {
+          compileExpr(fn, s.post);
+          emit(fn, 'POP');
+        }
+        emit(fn, 'JMP', condStart);
+
+        if (jfalse != null) {
+          const falsePath = fn.code.length;
+          patch(fn, jfalse, falsePath);
+          emit(fn, 'POP');
+        }
+
+        const end = fn.code.length;
+        for (const j of loopCtx.breakJumps) patch(fn, j, end);
+        controlStack.pop();
+        break;
+      }
+      case 'ForIn':
+      case 'ForOf': {
+        let targetName = null;
+        if (s.left.type === 'VarDecl') {
+          emit(fn,'CONST',constIndex({type:'null'}));
+          emit(fn,'DEFINE_NAME',s.left.name);
+          targetName = s.left.name;
+        } else if (s.left.type === 'ConstDecl') {
+          panic('const loop bindings are not supported for for-in/of yet');
+        } else if (s.left.type === 'Identifier') {
+          targetName = s.left.name;
+        } else {
+          panic('Invalid for-in/of assignment target: ' + s.left.type);
+        }
+
+        compileExpr(fn, s.right);
+        emit(fn, s.type === 'ForIn' ? 'ITER_INIT_IN' : 'ITER_INIT_OF');
+        const iterTmp = `__iter_${fn.code.length}`;
+        emit(fn, 'DEFINE_NAME', iterTmp);
+
+        const start = fn.code.length;
+        emit(fn, 'LOAD_NAME', iterTmp);
+        emit(fn, 'ITER_HAS_NEXT');
+        const jfalse = emit(fn, 'JMP_IF_FALSE', null);
+        emit(fn, 'POP');
+
+        emit(fn, 'LOAD_NAME', iterTmp);
+        emit(fn, 'ITER_GET_NEXT');
+        emit(fn, 'STORE_NAME', targetName);
+        emit(fn, 'POP');
+
+        const loopCtx = { kind:'loop', breakJumps:[], continueJumps:[] };
+        controlStack.push(loopCtx);
+        compileStmt(fn, s.body);
+
+        for (const j of loopCtx.continueJumps) patch(fn, j, start);
+        emit(fn, 'JMP', start);
+
+        const falsePath = fn.code.length;
+        patch(fn, jfalse, falsePath);
+        emit(fn, 'POP');
+
+        const end = fn.code.length;
+        for (const j of loopCtx.breakJumps) patch(fn, j, end);
+        controlStack.pop();
         break;
       }
       case 'Switch': {
@@ -134,9 +249,11 @@ export default function compile(ast) {
 
         const jNoMatch = emit(fn, 'JMP', null);
 
-        const switchBreaks = [];
         const endOfBodiesJumps = [];
         let discCleaned = false;
+
+        const switchCtx = { kind:'switch', breakJumps:[] };
+        controlStack.push(switchCtx);
 
         for (const { jumpIndex, caseNode } of caseBodyJumps) {
           patch(fn, jumpIndex, fn.code.length);
@@ -147,11 +264,7 @@ export default function compile(ast) {
             discCleaned = true;
           }
           for (const st of caseNode.body) {
-            if (st.type === 'Break') {
-              switchBreaks.push(emit(fn, 'JMP', null));
-            } else {
-              compileStmt(fn, st);
-            }
+            compileStmt(fn, st);
           }
         }
 
@@ -169,11 +282,7 @@ export default function compile(ast) {
             discCleaned = true;
           }
           for (const st of s.defaultCase.body) {
-            if (st.type === 'Break') {
-              switchBreaks.push(emit(fn, 'JMP', null));
-            } else {
-              compileStmt(fn, st);
-            }
+            compileStmt(fn, st);
           }
         } else {
           if (!discCleaned) {
@@ -184,10 +293,23 @@ export default function compile(ast) {
         }
 
         const end = fn.code.length;
-        for (const j of switchBreaks) patch(fn, j, end);
+        for (const j of switchCtx.breakJumps) patch(fn, j, end);
         for (const j of endOfBodiesJumps) patch(fn, j, end);
+        controlStack.pop();
 
         emit(fn, 'CONST', constIndex({ type: 'null' }));
+        break;
+      }
+      case 'Break': {
+        const target = nearestBreakTarget();
+        if (!target) panic("'break' not within loop or switch");
+        target.breakJumps.push(emit(fn, 'JMP', null));
+        break;
+      }
+      case 'Continue': {
+        const loop = nearestLoopTarget();
+        if (!loop) panic("'continue' not within loop");
+        loop.continueJumps.push(emit(fn, 'JMP', null));
         break;
       }
       case 'FuncDecl': {

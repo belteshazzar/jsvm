@@ -418,6 +418,34 @@ export default function createVM(bundle, { env: providedEnv } = {}) {
     panic('SET_ELEM on unsupported type: ' + recv.type);
   }
 
+  function iterItemsForIn(v) {
+    if (v.type === 'arr') {
+      const out = [];
+      for (let i = 0; i < v.items.length; i++) out.push({ type:'str', value: String(i) });
+      return out;
+    }
+    if (v.type === 'obj') {
+      return Object.keys(v.map).map(k => ({ type:'str', value: k }));
+    }
+    if (v.type === 'instance') {
+      return Object.keys(v.fields).map(k => ({ type:'str', value: k }));
+    }
+    if (v.type === 'str') {
+      const out = [];
+      for (let i = 0; i < v.value.length; i++) out.push({ type:'str', value: String(i) });
+      return out;
+    }
+    panic('for..in expects object-like value, got ' + v.type);
+  }
+
+  function iterItemsForOf(v) {
+    if (v.type === 'arr') return v.items.slice();
+    if (v.type === 'obj') return Object.keys(v.map).map(k => v.map[k]);
+    if (v.type === 'instance') return Object.keys(v.fields).map(k => v.fields[k]);
+    if (v.type === 'str') return v.value.split('').map(ch => ({ type:'str', value: ch }));
+    panic('for..of expects iterable value, got ' + v.type);
+  }
+
   // ---- VM core loop ----
   const vm = {
     toStringV,
@@ -650,6 +678,30 @@ export default function createVM(bundle, { env: providedEnv } = {}) {
           case 'SET_ELEM': {
             const value = stack.pop(); const key = stack.pop(); const recv = stack.pop();
             setElemValue(recv, key, value); stack.push(value); break;
+          }
+
+          case 'ITER_INIT_IN': {
+            const recv = stack.pop();
+            stack.push({ type:'iter', items: iterItemsForIn(recv), index: 0 });
+            break;
+          }
+          case 'ITER_INIT_OF': {
+            const recv = stack.pop();
+            stack.push({ type:'iter', items: iterItemsForOf(recv), index: 0 });
+            break;
+          }
+          case 'ITER_HAS_NEXT': {
+            const iter = stack[stack.length - 1];
+            if (!iter || iter.type !== 'iter') panic('ITER_HAS_NEXT on non-iterator');
+            stack.push({ type:'bool', value: iter.index < iter.items.length });
+            break;
+          }
+          case 'ITER_GET_NEXT': {
+            const iter = stack[stack.length - 1];
+            if (!iter || iter.type !== 'iter') panic('ITER_GET_NEXT on non-iterator');
+            if (iter.index >= iter.items.length) panic('ITER_GET_NEXT out of bounds');
+            stack.push(iter.items[iter.index++]);
+            break;
           }
 
           case 'MAKE_CLASS': { const cls = makeClass(instr.a, frame.env); stack.push(cls); break; }

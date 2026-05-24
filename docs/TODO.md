@@ -51,9 +51,9 @@ Non-goals (intentionally omitted from the subset):
 - [x] `switch`
 
 ### Test coverage
-- [ ] Short-circuit tests for `&&`/`||` with side effects
-- [ ] Loop tests (break/continue correctness)
-- [ ] Closure-capture tests (shadowing, outer variable capture)
+- [x] Short-circuit tests for `&&`/`||` with side effects
+- [x] Loop tests (break/continue correctness)
+- [ ] Closure-capture tests (shadowing coverage still missing; outer capture basics are covered)
 
 ---
 
@@ -61,12 +61,12 @@ Non-goals (intentionally omitted from the subset):
 
 ### Builtins (curated, sandbox-only operations)
 - [x] `Math` (pure numeric functions only)
-- [ ] `JSON.parse` / `JSON.stringify` (sandbox-value encoding only)
-- [ ] String methods (curated): `slice`, `includes`, `indexOf`, `toUpperCase`, …
-- [ ] Array method expansions (only those that cannot escape via callbacks, or add callback support with a careful design)
+- [x] `JSON.parse` / `JSON.stringify` (sandbox-value encoding only)
+- [ ] String methods (curated): `slice`, `includes`, `indexOf`, `toUpperCase`, … (currently: `toUpperCase`, `toLowerCase`, `charAt`)
+- [ ] Array method expansions (currently includes `push`, `pop`, `slice`, `indexOf`, `includes`, `join`, `shift`, `unshift`, `splice`, `reverse`, `sort` (no comparator callback), `concat`)
 
 ### Safety
-- [ ] Explicit denylist tests: ensure `eval`, `Function`, `globalThis`, `process` cannot be referenced
+- [x] Explicit denylist tests: ensure `eval`, `Function`, `globalThis`, `process` cannot be referenced
 - [ ] Confirm `Object.create(null)` is preserved for VM objects (no prototype pollution)
 
 ### Import (from allowed list)
@@ -82,7 +82,7 @@ Non-goals (intentionally omitted from the subset):
 - [x] `docs/bytecode/VALUES.md`
 
 ### Next steps
-- [ ] Add `bytecodeVersion` to bundle output and verify in VM loader
+- [x] Add `bytecodeVersion` to bundle output and verify in VM loader
 - [ ] Define canonical JSON encoding (stable ordering; e.g. instruction tuples)
 - [ ] Add “golden vectors” fixtures (source → bytecode → output) for cross-language VMs
 - [ ] Document semantics decisions explicitly (e.g. missing property returns `null` vs `undefined`)

@@ -42,6 +42,7 @@ export default function parse(tokens) {
     if (at('CONST')) return constDecl();
     if (at('IF')) return ifStmt();
     if (at('WHILE')) return whileStmt();
+    if (at('FOR')) return forStmt();
     if (at('SWITCH')) return switchStmt();
     if (at('BREAK')) return breakStmt();
     if (at('CONTINUE')) return continueStmt();
@@ -138,6 +139,77 @@ export default function parse(tokens) {
     expect('RPAREN', "Expected ')'");
     const body = at('LBRACE') ? block() : stmt();
     return { type:'While', cond, body, loc: locFrom(start) };
+  }
+
+  function forStmt() {
+    const start = next(); // FOR
+    expect('LPAREN', "Expected '(' after for");
+
+    // Classic for with empty initializer.
+    if (at('SEMI')) {
+      next();
+      const cond = at('SEMI') ? null : expr();
+      expect('SEMI', "Expected ';' after for condition");
+      const post = at('RPAREN') ? null : expr();
+      expect('RPAREN', "Expected ')' after for clauses");
+      const body = at('LBRACE') ? block() : stmt();
+      return { type: 'For', init: null, cond, post, body, loc: locFrom(start) };
+    }
+
+    // for-in / for-of with declaration binding.
+    if (at('LET') || at('CONST')) {
+      const kindTok = next();
+      const nameTok = expect('IDENT', 'Expected loop binding name');
+      const binding = {
+        type: kindTok.type === 'LET' ? 'VarDecl' : 'ConstDecl',
+        name: nameTok.value,
+        init: null,
+        loc: locFrom(kindTok),
+      };
+
+      if (at('IN') || at('OF')) {
+        const kw = next();
+        const right = expr();
+        expect('RPAREN', "Expected ')' after for-in/of header");
+        const body = at('LBRACE') ? block() : stmt();
+        const nodeType = kw.type === 'IN' ? 'ForIn' : 'ForOf';
+        return { type: nodeType, left: binding, right, body, loc: locFrom(start) };
+      }
+
+      if (at('EQUAL')) {
+        next();
+        binding.init = expr();
+      }
+      if (binding.type === 'ConstDecl' && binding.init == null) {
+        panic('Missing initializer in const declaration', kindTok);
+      }
+      expect('SEMI', "Expected ';' after for initializer");
+      const cond = at('SEMI') ? null : expr();
+      expect('SEMI', "Expected ';' after for condition");
+      const post = at('RPAREN') ? null : expr();
+      expect('RPAREN', "Expected ')' after for clauses");
+      const body = at('LBRACE') ? block() : stmt();
+      return { type: 'For', init: binding, cond, post, body, loc: locFrom(start) };
+    }
+
+    // Expression initializer OR assignment target for for-in/of.
+    const first = expr();
+    if (at('IN') || at('OF')) {
+      const kw = next();
+      const right = expr();
+      expect('RPAREN', "Expected ')' after for-in/of header");
+      const body = at('LBRACE') ? block() : stmt();
+      const nodeType = kw.type === 'IN' ? 'ForIn' : 'ForOf';
+      return { type: nodeType, left: first, right, body, loc: locFrom(start) };
+    }
+
+    expect('SEMI', "Expected ';' after for initializer");
+    const cond = at('SEMI') ? null : expr();
+    expect('SEMI', "Expected ';' after for condition");
+    const post = at('RPAREN') ? null : expr();
+    expect('RPAREN', "Expected ')' after for clauses");
+    const body = at('LBRACE') ? block() : stmt();
+    return { type: 'For', init: first, cond, post, body, loc: locFrom(start) };
   }
 
   function funcDecl() {
