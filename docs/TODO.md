@@ -62,7 +62,7 @@ Non-goals (intentionally omitted from the subset):
 - [x] `Math` (pure numeric functions only)
 - [x] `JSON.parse` / `JSON.stringify` (sandbox-value encoding only)
 - [x] `console` object (`log`/`info`/`warn`/`error`)
-- [x] Core `Promise` (`Promise.resolve`/`Promise.reject`, `then`/`catch`)
+- [x] Core `Promise` (`Promise.resolve`/`Promise.reject`, `then`/`catch`/`finally`, constructor executors, unhandled rejection policy) — tests: `test/features/promise.core-runtime.test.js`, `test/features/promise.unhandled-rejection.test.js`
 - [ ] String methods (curated): `slice`, `includes`, `indexOf`, `toUpperCase`, … (currently: `toUpperCase`, `toLowerCase`, `charAt`)
 - [ ] Array method expansions (currently includes `push`, `pop`, `slice`, `indexOf`, `includes`, `join`, `shift`, `unshift`, `splice`, `reverse`, `sort` (no comparator callback), `concat`)
 
@@ -90,11 +90,10 @@ Non-goals (intentionally omitted from the subset):
 - [x] Runtime coverage for await ordering, fulfillment, rejection, and suspension/resume — `test/features/async.await-runtime.test.js`, `test/features/promise.core-runtime.test.js`
 
 ### Next async steps
-- [ ] `Promise.prototype.finally`
-- [ ] Improve Promise constructor executor support (currently limited)
 - [ ] Async host I/O bridge (trusted host callbacks)
 - [ ] Whitelisted async import flow (host-mediated)
-- [ ] Unhandled rejection policy/reporting
+- [x] Promise constructor executor support — tests: `test/features/promise.core-runtime.test.js`
+- [x] Unhandled rejection policy/reporting — tests: `test/features/promise.unhandled-rejection.test.js`
 
 ---
 
