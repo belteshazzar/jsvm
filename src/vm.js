@@ -386,6 +386,49 @@ export default function createVM(bundle, { env: providedEnv, microtaskLimit = 10
   }
 
   function runPromiseReaction(reaction, state, value) {
+    if (reaction.kind === 'finally') {
+      const next = reaction.next;
+      const onFinally = reaction.onFinally;
+
+      if (!onFinally) {
+        if (state === 'fulfilled') resolvePromise(next, value);
+        else rejectPromise(next, value);
+        return;
+      }
+
+      try {
+        const out = callPromiseHandler(onFinally, [], null);
+        if (isPromise(out)) {
+          const passThrough = {
+            type:'native',
+            name:'Promise.finally.passThrough',
+            arity:1,
+            call: (vm2) => {
+              if (state === 'fulfilled') vm2.promiseResolve(next, value);
+              else vm2.promiseReject(next, value);
+              return { type:'null' };
+            },
+          };
+          const rejectFromFinally = {
+            type:'native',
+            name:'Promise.finally.rejectFromFinally',
+            arity:1,
+            call: (vm2, args) => {
+              vm2.promiseReject(next, args[0] ?? { type:'undef' });
+              return { type:'null' };
+            },
+          };
+          thenPromise(out, passThrough, rejectFromFinally);
+        } else {
+          if (state === 'fulfilled') resolvePromise(next, value);
+          else rejectPromise(next, value);
+        }
+      } catch (err) {
+        rejectPromise(next, boxError(err));
+      }
+      return;
+    }
+
     const handler = state === 'fulfilled' ? reaction.onFulfilled : reaction.onRejected;
     const next = reaction.next;
 
@@ -410,6 +453,24 @@ export default function createVM(bundle, { env: providedEnv, microtaskLimit = 10
       next,
       onFulfilled: isCallable(onFulfilled) ? onFulfilled : null,
       onRejected: isCallable(onRejected) ? onRejected : null,
+    };
+
+    if (promise.state === 'pending') {
+      promise.fulfillReactions.push(reaction);
+      promise.rejectReactions.push(reaction);
+    } else {
+      enqueueMicrotask(() => runPromiseReaction(reaction, promise.state, promise.value));
+    }
+    return next;
+  }
+
+  function finallyPromise(promise, onFinally) {
+    if (!promise || promise.type !== 'promise') panic('Promise.finally called on non-promise value');
+    const next = createPromiseValue();
+    const reaction = {
+      kind: 'finally',
+      next,
+      onFinally: isCallable(onFinally) ? onFinally : null,
     };
 
     if (promise.state === 'pending') {
@@ -632,6 +693,7 @@ export default function createVM(bundle, { env: providedEnv, microtaskLimit = 10
     promiseResolve: resolvePromise,
     promiseReject: rejectPromise,
     promiseThen: thenPromise,
+    promiseFinally: finallyPromise,
     runMain() {
       if (callstack.length === 0) {
         const main = makeClosure(0, globals);

@@ -84,3 +84,40 @@ Promise.reject('oops').catch(recover).then(print);
 `;
   expect(printed(src)).toEqual(['recovered:oops']);
 });
+
+test('finally runs on fulfilled promise and preserves value', () => {
+  const src = `
+Promise.resolve(5)
+  .finally(() => print('cleanup'))
+  .then(print);
+`;
+  expect(printed(src)).toEqual(['cleanup', '5']);
+});
+
+test('finally runs on rejected promise and preserves reason', () => {
+  const src = `
+Promise.reject('bad')
+  .finally(() => print('cleanup'))
+  .catch(print);
+`;
+  expect(printed(src)).toEqual(['cleanup', 'bad']);
+});
+
+test('finally callback rejection overrides prior fulfillment', () => {
+  const src = `
+Promise.resolve('ok')
+  .finally(() => Promise.reject('ferr'))
+  .then(print)
+  .catch(print);
+`;
+  expect(printed(src)).toEqual(['ferr']);
+});
+
+test('finally callback rejection overrides prior rejection reason', () => {
+  const src = `
+Promise.reject('orig')
+  .finally(() => Promise.reject('ferr'))
+  .catch(print);
+`;
+  expect(printed(src)).toEqual(['ferr']);
+});

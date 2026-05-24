@@ -83,6 +83,14 @@ export function createDefaultEnv({ onPrint }) {
       return vm.promiseThen(thisObj, null, onRejected);
     }
   };
+  PromiseProto.map.finally = {
+    type: 'native', name: 'Promise.prototype.finally', arity: 1,
+    call: (vm, args, thisObj) => {
+      if (!thisObj || thisObj.type !== 'promise') panic('Promise.finally called with invalid this');
+      const onFinally = args[0] ?? null;
+      return vm.promiseFinally(thisObj, onFinally);
+    }
+  };
 
   // Math builtins
   const mathFuncs = [
