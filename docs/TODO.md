@@ -9,7 +9,6 @@ Design goals:
 - Stable, documented bytecode for alternative VM implementations
 
 Non-goals (intentionally omitted from the subset):
-- Async/await, Promises
 - Generators / `yield`
 - Dynamic `import` / unrestricted module access
 - `eval`, `new Function`, reflective escapes
@@ -62,6 +61,8 @@ Non-goals (intentionally omitted from the subset):
 ### Builtins (curated, sandbox-only operations)
 - [x] `Math` (pure numeric functions only)
 - [x] `JSON.parse` / `JSON.stringify` (sandbox-value encoding only)
+- [x] `console` object (`log`/`info`/`warn`/`error`)
+- [x] Core `Promise` (`Promise.resolve`/`Promise.reject`, `then`/`catch`)
 - [ ] String methods (curated): `slice`, `includes`, `indexOf`, `toUpperCase`, … (currently: `toUpperCase`, `toLowerCase`, `charAt`)
 - [ ] Array method expansions (currently includes `push`, `pop`, `slice`, `indexOf`, `includes`, `join`, `shift`, `unshift`, `splice`, `reverse`, `sort` (no comparator callback), `concat`)
 
@@ -71,6 +72,29 @@ Non-goals (intentionally omitted from the subset):
 
 ### Import (from allowed list)
 - [ ] `import` for known packages that are whitelisted in the VM
+
+---
+
+## Phase D — Async runtime & language
+
+### Language/runtime
+- [x] `async function` syntax (declaration + expression) — tests: `test/features/syntax.async-await.parser.test.js`
+- [x] `await` syntax + precedence (unary) — tests: `test/features/syntax.async-await.parser.test.js`
+- [x] Compiler lowering for `await` (`AWAIT`) with async metadata — tests: `test/features/async.compiler-lowering.test.js`
+- [x] VM continuation/suspension for `AWAIT` via microtask queue — tests: `test/features/async.await-runtime.test.js`
+- [x] Async function calls return promises; runtime errors reject async result promises — tests: `test/features/async.await-runtime.test.js`, `test/features/promise.core-runtime.test.js`
+
+### Test coverage
+- [x] Parser coverage for async/await syntax — `test/features/syntax.async-await.parser.test.js`
+- [x] Compiler coverage for async metadata + await lowering — `test/features/async.compiler-lowering.test.js`
+- [x] Runtime coverage for await ordering, fulfillment, rejection, and suspension/resume — `test/features/async.await-runtime.test.js`, `test/features/promise.core-runtime.test.js`
+
+### Next async steps
+- [ ] `Promise.prototype.finally`
+- [ ] Improve Promise constructor executor support (currently limited)
+- [ ] Async host I/O bridge (trusted host callbacks)
+- [ ] Whitelisted async import flow (host-mediated)
+- [ ] Unhandled rejection policy/reporting
 
 ---
 
