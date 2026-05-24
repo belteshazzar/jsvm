@@ -56,6 +56,10 @@ Conventions:
 
 - `NOT`: logical not.
 - `NEG`: numeric negation (expects `num`).
+- `AWAIT`: await a value in an async function frame.
+  - If operand is non-promise or already fulfilled promise, push fulfilled value and continue.
+  - If operand is pending promise, suspend current async frame and resume via microtask reaction when settled.
+  - If operand is rejected promise, reject the async function result promise.
 
 ## Binary arithmetic
 

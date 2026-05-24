@@ -16,8 +16,15 @@ export default function compile(ast) {
     finally { currentLoc = prev; }
   }
 
-  function newFunc(name, params) {
-    const fn = { name, params, code: [], arity: params.length };
+  function newFunc(name, params, opts = {}) {
+    const fn = {
+      name,
+      params,
+      code: [],
+      arity: params.length,
+      async: !!opts.async,
+      awaitSites: [],
+    };
     functions.push(fn);
     return fn;
   }
@@ -41,6 +48,17 @@ export default function compile(ast) {
   function patch(fn, idx, aNew) { fn.code[idx].a = aNew; }
 
   const controlStack = [];
+  const functionContextStack = [];
+
+  function withFunctionContext(ctx, fnBody) {
+    functionContextStack.push(ctx);
+    try { return fnBody(); }
+    finally { functionContextStack.pop(); }
+  }
+
+  function currentFunctionContext() {
+    return functionContextStack[functionContextStack.length - 1] ?? null;
+  }
   function nearestBreakTarget() {
     for (let i = controlStack.length - 1; i >= 0; i--) {
       const c = controlStack[i];
@@ -56,8 +74,10 @@ export default function compile(ast) {
     return null;
   }
 
-  const main = newFunc('(main)', []);
-  compileBlockLike(main, ast.body);
+  const main = newFunc('(main)', [], { async: false });
+  withFunctionContext({ async: false, name: '(main)' }, () => {
+    compileBlockLike(main, ast.body);
+  });
   // Only emit CONST null if the last statement is not an ExprStmt
   const lastStmt = ast.body[ast.body.length - 1];
   if (!lastStmt || lastStmt.type !== 'ExprStmt') {
@@ -313,8 +333,10 @@ export default function compile(ast) {
         break;
       }
       case 'FuncDecl': {
-        const f = newFunc(s.name, s.params);
-        compileBlockLike(f, s.body.body);
+        const f = newFunc(s.name, s.params, { async: !!s.async });
+        withFunctionContext({ async: !!s.async, name: s.name }, () => {
+          compileBlockLike(f, s.body.body);
+        });
         emit(f,'CONST',constIndex({type:'null'}));
         emit(f,'RET');
         emit(fn,'MAKE_FUNCTION',functions.indexOf(f));
@@ -324,16 +346,20 @@ export default function compile(ast) {
       case 'ClassDecl': {
         let ctorIndex = null;
         if (s.ctor) {
-          const f = newFunc(`${s.name}.constructor`, s.ctor.params);
-          compileBlockLike(f, s.ctor.body.body);
+          const f = newFunc(`${s.name}.constructor`, s.ctor.params, { async: !!s.ctor.async });
+          withFunctionContext({ async: !!s.ctor.async, name: `${s.name}.constructor` }, () => {
+            compileBlockLike(f, s.ctor.body.body);
+          });
           emit(f,'CONST',constIndex({type:'null'}));
           emit(f,'RET');
           ctorIndex = functions.indexOf(f);
         }
         const methodEntries = [];
         for (const m of s.methods) {
-          const f = newFunc(`${s.name}.${m.name}`, m.params);
-          compileBlockLike(f, m.body.body);
+          const f = newFunc(`${s.name}.${m.name}`, m.params, { async: !!m.async });
+          withFunctionContext({ async: !!m.async, name: `${s.name}.${m.name}` }, () => {
+            compileBlockLike(f, m.body.body);
+          });
           emit(f,'CONST',constIndex({type:'null'}));
           emit(f,'RET');
           methodEntries.push({ name:m.name, funcIndex:functions.indexOf(f) });
@@ -485,8 +511,10 @@ export default function compile(ast) {
         // Function expressions create closures. Named function expressions bind
         // the name only within the function body (not in the outer scope).
         const internalName = e.name != null ? String(e.name) : '<anonymous>';
-        const f = newFunc(internalName, e.params);
-        compileBlockLike(f, e.body.body);
+        const f = newFunc(internalName, e.params, { async: !!e.async });
+        withFunctionContext({ async: !!e.async, name: internalName }, () => {
+          compileBlockLike(f, e.body.body);
+        });
         emit(f, 'CONST', constIndex({ type: 'null' }));
         emit(f, 'RET');
         emit(fn, 'MAKE_FUNCTION', functions.indexOf(f));
@@ -499,17 +527,30 @@ export default function compile(ast) {
       }
 
       case 'ArrowFunc': {
-        const f = newFunc('<arrow>', e.params);
-        if (e.bodyType === 'expr') {
-          compileExpr(f, e.body);
-          emit(f, 'RET');
-        } else {
-          compileBlockLike(f, e.body.body);
-          emit(f, 'CONST', constIndex({ type: 'null' }));
-          emit(f, 'RET');
-        }
+        const f = newFunc('<arrow>', e.params, { async: !!e.async });
+        withFunctionContext({ async: !!e.async, name: '<arrow>' }, () => {
+          if (e.bodyType === 'expr') {
+            compileExpr(f, e.body);
+            emit(f, 'RET');
+          } else {
+            compileBlockLike(f, e.body.body);
+            emit(f, 'CONST', constIndex({ type: 'null' }));
+            emit(f, 'RET');
+          }
+        });
         emit(fn, 'MAKE_FUNCTION', functions.indexOf(f));
         emit(fn, 'CAPTURE_THIS');
+        break;
+      }
+      case 'Await': {
+        const ctx = currentFunctionContext();
+        if (!ctx || !ctx.async) {
+          panic("'await' is only valid in async functions");
+        }
+        compileExpr(fn, e.expr);
+        const awaitIdx = emit(fn, 'AWAIT');
+        if (!Array.isArray(fn.awaitSites)) fn.awaitSites = [];
+        fn.awaitSites.push(awaitIdx);
         break;
       }
       case 'Member':

@@ -7,7 +7,7 @@ function formatInstr(f, instr, ip) {
   return `@${ip} ${instr.op}${a}${b} in ${f.name}`;
 }
 
-export default function createVM(bundle, { env: providedEnv } = {}) {
+export default function createVM(bundle, { env: providedEnv, microtaskLimit = 100000 } = {}) {
   if (bundle?.bytecodeVersion !== 1) {
     const got = bundle?.bytecodeVersion;
     panic(`Unsupported bytecodeVersion ${String(got)} (expected 1)`);
@@ -20,6 +20,7 @@ export default function createVM(bundle, { env: providedEnv } = {}) {
   const StringProto = env.StringProto ?? null;
   const NumberProto = env.NumberProto ?? null;
   const ArrayProto = env.ArrayProto ?? null;
+  const PromiseProto = env.PromiseProto ?? null;
 
   const NumberProtoMethods = env.NumberProtoMethods ?? null;
 
@@ -68,6 +69,7 @@ export default function createVM(bundle, { env: providedEnv } = {}) {
       case 'instance': return instanceToString(v);
       case 'func': return `<function ${v.name ?? '<anonymous>'}>`;
       case 'native': return `<native ${v.name}>`;
+      case 'promise': return `<promise ${v.state}>`;
       default: return `<${v.type}>`;
     }
   }
@@ -260,8 +262,164 @@ export default function createVM(bundle, { env: providedEnv } = {}) {
 
   const stack = [];
   const callstack = [];
+  const microtasks = [];
+  let drainingMicrotasks = false;
   const globals = Env(null);
   for (const k of Object.keys(builtins)) globals.map[k]=builtins[k];
+
+  function enqueueMicrotask(job) {
+    if (typeof job !== 'function') {
+      throw new TypeError('Microtask must be a function');
+    }
+    microtasks.push(job);
+  }
+
+  function runMicrotasks() {
+    if (drainingMicrotasks) return 0;
+    drainingMicrotasks = true;
+    let ran = 0;
+    try {
+      while (microtasks.length > 0) {
+        if (ran >= microtaskLimit) {
+          panic(`Microtask queue limit exceeded (${microtaskLimit})`);
+        }
+        const job = microtasks.shift();
+        job();
+        ran++;
+      }
+      return ran;
+    } finally {
+      drainingMicrotasks = false;
+    }
+  }
+
+  function isCallable(v) {
+    return !!v && (v.type === 'native' || v.type === 'func');
+  }
+
+  function boxError(err) {
+    return { type:'str', value: String(err?.message ?? err) };
+  }
+
+  function callPromiseHandler(fnValue, args, thisObj = null) {
+    if (!fnValue) throw new Error('Promise reaction callback is missing');
+    if (fnValue.type === 'native') {
+      return fnValue.call(vm, args, thisObj) ?? { type:'null' };
+    }
+    if (fnValue.type === 'func') {
+      pushFrame(fnValue, args, thisObj, {});
+      return vm.runMain();
+    }
+    throw new Error('Promise reaction callback must be callable');
+  }
+
+  function isPromise(v) {
+    return !!v && v.type === 'promise';
+  }
+
+  function cleanupFrameStack(frame) {
+    if (typeof frame?.stackBase !== 'number') return;
+    if (stack.length > frame.stackBase) {
+      stack.length = frame.stackBase;
+    }
+  }
+
+  function resumeAsyncFrame(frame, ok, value) {
+    if (!frame || !frame.asyncFunction) return;
+    if (frame.awaiting !== true) return;
+    frame.awaiting = false;
+    frame.resumeRecord = { ok, value };
+    const saved = frame.savedStack ?? [];
+    frame.savedStack = null;
+    frame.stackBase = stack.length;
+    for (const v of saved) stack.push(v);
+    callstack.push(frame);
+  }
+
+  function createPromiseValue() {
+    return {
+      type:'promise',
+      state:'pending',
+      value:{ type:'undef' },
+      fulfillReactions:[],
+      rejectReactions:[],
+      proto: PromiseProto,
+    };
+  }
+
+  function settlePromise(promise, state, value) {
+    if (!promise || promise.type !== 'promise') panic('Attempted to settle non-promise value');
+    if (promise.state !== 'pending') return;
+    promise.state = state;
+    promise.value = value;
+
+    const reactions = state === 'fulfilled' ? promise.fulfillReactions : promise.rejectReactions;
+    for (const reaction of reactions) {
+      enqueueMicrotask(() => runPromiseReaction(reaction, state, value));
+    }
+    promise.fulfillReactions = [];
+    promise.rejectReactions = [];
+  }
+
+  function resolvePromise(promise, value) {
+    if (promise === value) {
+      settlePromise(promise, 'rejected', { type:'str', value:'TypeError: Promise cannot resolve with itself' });
+      return;
+    }
+    if (value && value.type === 'promise') {
+      if (value.state === 'pending') {
+        value.fulfillReactions.push({ next: promise, onFulfilled: null, onRejected: null });
+        value.rejectReactions.push({ next: promise, onFulfilled: null, onRejected: null });
+      } else {
+        enqueueMicrotask(() => {
+          if (value.state === 'fulfilled') settlePromise(promise, 'fulfilled', value.value);
+          else settlePromise(promise, 'rejected', value.value);
+        });
+      }
+      return;
+    }
+    settlePromise(promise, 'fulfilled', value);
+  }
+
+  function rejectPromise(promise, reason) {
+    settlePromise(promise, 'rejected', reason);
+  }
+
+  function runPromiseReaction(reaction, state, value) {
+    const handler = state === 'fulfilled' ? reaction.onFulfilled : reaction.onRejected;
+    const next = reaction.next;
+
+    if (!handler) {
+      if (state === 'fulfilled') resolvePromise(next, value);
+      else rejectPromise(next, value);
+      return;
+    }
+
+    try {
+      const out = callPromiseHandler(handler, [value], null);
+      resolvePromise(next, out ?? { type:'null' });
+    } catch (err) {
+      rejectPromise(next, boxError(err));
+    }
+  }
+
+  function thenPromise(promise, onFulfilled, onRejected) {
+    if (!promise || promise.type !== 'promise') panic('Promise.then called on non-promise value');
+    const next = createPromiseValue();
+    const reaction = {
+      next,
+      onFulfilled: isCallable(onFulfilled) ? onFulfilled : null,
+      onRejected: isCallable(onRejected) ? onRejected : null,
+    };
+
+    if (promise.state === 'pending') {
+      promise.fulfillReactions.push(reaction);
+      promise.rejectReactions.push(reaction);
+    } else {
+      enqueueMicrotask(() => runPromiseReaction(reaction, promise.state, promise.value));
+    }
+    return next;
+  }
 
   function pushFrame(funcValue, args, thisObj=null, flags={}) {
     if (funcValue.type==='native') {
@@ -277,7 +435,22 @@ export default function createVM(bundle, { env: providedEnv } = {}) {
       envDefineConst(env, funcValue.bindName, funcValue);
     }
     const effectiveThis = funcValue.lexThis !== undefined ? funcValue.lexThis : thisObj;
-    callstack.push({ funcIndex: funcValue.funcIndex, ip:0, env, thisObj: effectiveThis, isCtor: !!flags.isCtor, isDerived: !!flags.isDerived, superCalled: !!flags.superCalled });
+    callstack.push({
+      funcIndex: funcValue.funcIndex,
+      ip:0,
+      env,
+      thisObj: effectiveThis,
+      isCtor: !!flags.isCtor,
+      isDerived: !!flags.isDerived,
+      superCalled: !!flags.superCalled,
+      stackBase: stack.length,
+      asyncFunction: !!flags.asyncFunction,
+      asyncResult: flags.asyncResult ?? null,
+      awaiting: false,
+      savedStack: null,
+      resumeRecord: null,
+      settled: false,
+    });
   }
   function popFrame(){ return callstack.pop(); }
 
@@ -378,6 +551,10 @@ export default function createVM(bundle, { env: providedEnv } = {}) {
     if (recv.type==='native' && recv.map) {
       return (prop in recv.map) ? recv.map[prop] : {type:'undef'};
     }
+    if (recv.type==='promise') {
+      const m = PromiseProto ? protoLookup(PromiseProto, prop) : null;
+      return m ?? {type:'undef'};
+    }
     panic('GET_PROP on unsupported type: ' + recv.type);
   }
   function setPropValue(recv, prop, value) {
@@ -449,20 +626,45 @@ export default function createVM(bundle, { env: providedEnv } = {}) {
   // ---- VM core loop ----
   const vm = {
     toStringV,
+    enqueueMicrotask,
+    runMicrotasks,
+    createPromise: createPromiseValue,
+    promiseResolve: resolvePromise,
+    promiseReject: rejectPromise,
+    promiseThen: thenPromise,
     runMain() {
-      const main = makeClosure(0, globals);
-      pushFrame(main, []);
-      while (callstack.length>0) {
-        const frame = callstack[callstack.length-1];
-        const f = functions[frame.funcIndex];
-        const instr = f.code[frame.ip++];
-        if (!instr) { stack.push({type:'null'}); popFrame(); continue; }
-        setLastInstr({
-          text: formatInstr(f, instr, frame.ip-1),
-          loc: instr.loc ?? null,
-        });
+      if (callstack.length === 0) {
+        const main = makeClosure(0, globals);
+        pushFrame(main, []);
+      }
+      while (true) {
+        while (callstack.length>0) {
+          const frame = callstack[callstack.length-1];
+          try {
+          if (frame.resumeRecord) {
+            const rr = frame.resumeRecord;
+            frame.resumeRecord = null;
+            if (!rr.ok) {
+              cleanupFrameStack(frame);
+              popFrame();
+              if (!frame.settled) {
+                frame.settled = true;
+                rejectPromise(frame.asyncResult, rr.value ?? { type:'undef' });
+              }
+              continue;
+            }
+            stack.push(rr.value ?? { type:'undef' });
+          }
 
-        switch (instr.op) {
+          const f = functions[frame.funcIndex];
+          const instr = f.code[frame.ip++];
+          if (!instr) { stack.push({type:'null'}); popFrame(); continue; }
+          setLastInstr({
+            text: formatInstr(f, instr, frame.ip-1),
+            loc: instr.loc ?? null,
+          });
+
+            switch (instr.op) {
           case 'CONST': {
             const v = hydrateConst(consts[instr.a]);
             if (!v) panic('Invalid const pool index: ' + String(instr.a));
@@ -510,7 +712,13 @@ export default function createVM(bundle, { env: providedEnv } = {}) {
             for (let k=argc-1;k>=0;k--) args[k]=stack.pop();
             const callee = stack.pop();
             if (callee.type!=='func' && callee.type!=='native') panic('Attempt to call a non-function value: ' + callee.type);
-            pushFrame(callee, args, /*this*/null, {});
+            if (callee.type === 'func' && functions[callee.funcIndex]?.async) {
+              const p = createPromiseValue();
+              stack.push(p);
+              pushFrame(callee, args, /*this*/null, { asyncFunction:true, asyncResult:p });
+            } else {
+              pushFrame(callee, args, /*this*/null, {});
+            }
             break;
           }
 
@@ -523,7 +731,13 @@ export default function createVM(bundle, { env: providedEnv } = {}) {
             const prop = keyToString(key);
             const callee = getPropValue(recv, prop);
             if (callee.type!=='func' && callee.type!=='native') panic('Attempt to call non-function property: ' + prop);
-            pushFrame(callee, args, recv, {});
+            if (callee.type === 'func' && functions[callee.funcIndex]?.async) {
+              const p = createPromiseValue();
+              stack.push(p);
+              pushFrame(callee, args, recv, { asyncFunction:true, asyncResult:p });
+            } else {
+              pushFrame(callee, args, recv, {});
+            }
             break;
           }
 
@@ -535,7 +749,13 @@ export default function createVM(bundle, { env: providedEnv } = {}) {
             const recv = stack.pop();
             const callee = getElemValue(recv, key);
             if (callee.type!=='func' && callee.type!=='native') panic('Attempt to call non-function element');
-            pushFrame(callee, args, recv, {});
+            if (callee.type === 'func' && functions[callee.funcIndex]?.async) {
+              const p = createPromiseValue();
+              stack.push(p);
+              pushFrame(callee, args, recv, { asyncFunction:true, asyncResult:p });
+            } else {
+              pushFrame(callee, args, recv, {});
+            }
             break;
           }
 
@@ -608,12 +828,64 @@ export default function createVM(bundle, { env: providedEnv } = {}) {
           case 'RET': {
             const ret = stack.pop();
             const finished = popFrame();
-            if (finished?.isCtor) {
+            if (finished?.asyncFunction) {
+              cleanupFrameStack(finished);
+              if (!finished.settled) {
+                finished.settled = true;
+                resolvePromise(finished.asyncResult, ret ?? {type:'null'});
+              }
+            } else if (finished?.isCtor) {
               if (finished.isDerived && !finished.superCalled) panic("Derived constructor must call super()");
               stack.push(isObjectLike(ret) ? ret : (finished.thisObj ?? {type:'undef'}));
             } else {
               stack.push(ret ?? {type:'null'});
             }
+            break;
+          }
+
+          case 'AWAIT': {
+            if (!frame.asyncFunction) panic("'await' in non-async frame");
+            const awaited = stack.pop() ?? { type:'undef' };
+
+            // Await always resumes asynchronously via microtask, including
+            // plain values and already-settled promises.
+            frame.awaiting = true;
+            frame.savedStack = stack.splice(frame.stackBase);
+            popFrame();
+
+            if (!isPromise(awaited)) {
+              enqueueMicrotask(() => resumeAsyncFrame(frame, true, awaited));
+              break;
+            }
+
+            if (awaited.state === 'fulfilled') {
+              enqueueMicrotask(() => resumeAsyncFrame(frame, true, awaited.value));
+              break;
+            }
+            if (awaited.state === 'rejected') {
+              enqueueMicrotask(() => resumeAsyncFrame(frame, false, awaited.value));
+              break;
+            }
+
+            const onFulfilled = {
+              type:'native',
+              name:'await.onFulfilled',
+              arity:1,
+              call: (vm2, a) => {
+                resumeAsyncFrame(frame, true, a[0] ?? { type:'undef' });
+                return { type:'null' };
+              },
+            };
+            const onRejected = {
+              type:'native',
+              name:'await.onRejected',
+              arity:1,
+              call: (vm2, a) => {
+                resumeAsyncFrame(frame, false, a[0] ?? { type:'undef' });
+                return { type:'null' };
+              },
+            };
+            thenPromise(awaited, onFulfilled, onRejected);
             break;
           }
 
@@ -638,6 +910,7 @@ export default function createVM(bundle, { env: providedEnv } = {}) {
               case 'native': t = 'native'; break;
               case 'class': t = 'class'; break;
               case 'instance': t = 'instance'; break;
+              case 'promise': t = 'promise'; break;
               default: t = 'undef';
             }
             stack.push({ type: 'str', value: t });
@@ -749,6 +1022,11 @@ export default function createVM(bundle, { env: providedEnv } = {}) {
                   stack.push(inst);
                   break;
                 }
+                case 'Promise': {
+                  const p = ctor.call(vm, args, null);
+                  stack.push(p);
+                  break;
+                }
                 default:
                   panic('Attempt to instantiate non-class: ' + ctor.name);
               }
@@ -778,7 +1056,27 @@ export default function createVM(bundle, { env: providedEnv } = {}) {
             break;
           }
           default: panic('Unknown opcode: ' + instr.op);
+            }
+          } catch (err) {
+            let rejectedAsync = false;
+            while (callstack.length > 0) {
+              const top = callstack[callstack.length - 1];
+              cleanupFrameStack(top);
+              popFrame();
+              if (top.asyncFunction && !top.settled) {
+                top.settled = true;
+                rejectPromise(top.asyncResult, boxError(err));
+                rejectedAsync = true;
+                break;
+              }
+            }
+            if (rejectedAsync) continue;
+            throw err;
+          }
         }
+
+        const ran = runMicrotasks();
+        if (callstack.length === 0 && ran === 0) break;
       }
       return stack.pop();
     },

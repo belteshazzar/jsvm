@@ -4,6 +4,7 @@ import { panic } from './common.js';
 export default function parse(tokens) {
   let i = 0;
   function peek() { return tokens[i]; }
+  function peekNext(n = 1) { return tokens[i + n] ?? tokens[tokens.length - 1]; }
   function at(type) { return peek().type === type; }
   function check(type) { return at(type); }
   function next() { return tokens[i++]; }
@@ -47,12 +48,19 @@ export default function parse(tokens) {
     if (at('BREAK')) return breakStmt();
     if (at('CONTINUE')) return continueStmt();
     if (at('FUNCTION')) return funcDecl();
+    if (at('ASYNC') && peekNext().type === 'FUNCTION') return asyncFuncDecl();
     if (at('RETURN')) return returnStmt();
     if (at('CLASS')) return classDecl();
     if (at('LBRACE')) return block();
     const e = expr();
     expect('SEMI', "Expected ';' after expression");
     return { type:'ExprStmt', expr:e };
+  }
+
+  function asyncFuncDecl() {
+    const asyncTok = next(); // ASYNC
+    expect('FUNCTION', "Expected 'function' after async");
+    return funcDecl(asyncTok);
   }
 
   function breakStmt() {
@@ -212,8 +220,8 @@ export default function parse(tokens) {
     return { type: 'For', init: first, cond, post, body, loc: locFrom(start) };
   }
 
-  function funcDecl() {
-    const start = next(); // FUNCTION
+  function funcDecl(asyncTok = null) {
+    const start = asyncTok ?? next(); // FUNCTION or ASYNC token
     const name = expect('IDENT', "Expected function name").value;
     expect('LPAREN', "Expected '('");
     const params = [];
@@ -223,7 +231,7 @@ export default function parse(tokens) {
     }
     expect('RPAREN', "Expected ')'");
     const body = block();
-    return { type:'FuncDecl', name, params, body, loc: locFrom(start) };
+    return { type:'FuncDecl', name, params, body, async: !!asyncTok, loc: locFrom(start) };
   }
 
   function returnStmt() {
@@ -366,6 +374,11 @@ export default function parse(tokens) {
       const right = unary();
       return { type:'Unary', op: 'typeof', expr: right, loc: locFrom(tok) };
     }
+    if (at('AWAIT')) {
+      const tok = next();
+      const right = unary();
+      return { type:'Await', expr: right, loc: locFrom(tok) };
+    }
     if (at('NEW')) return newExpr();
     return call();
   }
@@ -458,6 +471,21 @@ export default function parse(tokens) {
     if (at('IDENT') && peek().value === 'undefined') { const t = next(); return { type:'Literal', value: undefined, loc: locFrom(t) }; }
     if (at('THIS')) { const t = next(); return { type:'This', loc: locFrom(t) }; }
     if (at('SUPER')) { const t = next(); return { type:'Super', loc: locFrom(t) }; }
+    if (at('ASYNC') && peekNext().type === 'FUNCTION') {
+      const asyncTok = next(); // ASYNC
+      expect('FUNCTION', "Expected 'function' after async");
+      let name = null;
+      if (at('IDENT')) name = next().value;
+      expect('LPAREN', "Expected '('");
+      const params = [];
+      if (!at('RPAREN')) {
+        do { params.push(expect('IDENT', 'Expected parameter name').value); }
+        while (at('COMMA') && next());
+      }
+      expect('RPAREN', "Expected ')'");
+      const body = block();
+      return { type:'FuncExpr', name, params, body, async: true, loc: locFrom(asyncTok) };
+    }
     if (at('FUNCTION')) {
       const start = next();
       let name = null;
@@ -470,7 +498,7 @@ export default function parse(tokens) {
       }
       expect('RPAREN', "Expected ')'");
       const body = block();
-      return { type:'FuncExpr', name, params, body, loc: locFrom(start) };
+      return { type:'FuncExpr', name, params, body, async: false, loc: locFrom(start) };
     }
     if (at('IDENT')) {
       const t = next();

@@ -7,6 +7,7 @@ export function createDefaultEnv({ onPrint }) {
   const StringProto = { type: 'proto', map: Object.create(null), proto: null };
   const NumberProto = { type: 'proto', map: Object.create(null), proto: null };
   const ArrayProto = { type: 'proto', map: Object.create(null), proto: null };
+  const PromiseProto = { type: 'proto', map: Object.create(null), proto: null };
 
   // Object prototype methods
   ObjectProto.map.toString = {
@@ -65,6 +66,24 @@ export function createDefaultEnv({ onPrint }) {
   NumberProto.map.toString = NumberProtoMethods.toString;
   NumberProto.map.valueOf = NumberProtoMethods.valueOf;
 
+  PromiseProto.map.then = {
+    type: 'native', name: 'Promise.prototype.then', arity: 2,
+    call: (vm, args, thisObj) => {
+      if (!thisObj || thisObj.type !== 'promise') panic('Promise.then called with invalid this');
+      const onFulfilled = args[0] ?? null;
+      const onRejected = args[1] ?? null;
+      return vm.promiseThen(thisObj, onFulfilled, onRejected);
+    }
+  };
+  PromiseProto.map.catch = {
+    type: 'native', name: 'Promise.prototype.catch', arity: 1,
+    call: (vm, args, thisObj) => {
+      if (!thisObj || thisObj.type !== 'promise') panic('Promise.catch called with invalid this');
+      const onRejected = args[0] ?? null;
+      return vm.promiseThen(thisObj, null, onRejected);
+    }
+  };
+
   // Math builtins
   const mathFuncs = [
     ['abs', 1, Math.abs], ['acos', 1, Math.acos], ['acosh', 1, Math.acosh], ['asin', 1, Math.asin], ['asinh', 1, Math.asinh],
@@ -117,8 +136,45 @@ export function createDefaultEnv({ onPrint }) {
     return undefined;
   }
 
+  function consoleWrite(vm, args) {
+    const out = (args ?? []).map(a => vm.toStringV(a ?? { type: 'undef' })).join(' ');
+    onPrint?.(out);
+    return { type: 'undef' };
+  }
+
+  const ConsoleObj = {
+    type: 'obj',
+    map: {
+      log: {
+        type: 'native',
+        name: 'console.log',
+        arity: null,
+        call: (vm, args) => consoleWrite(vm, args),
+      },
+      info: {
+        type: 'native',
+        name: 'console.info',
+        arity: null,
+        call: (vm, args) => consoleWrite(vm, args),
+      },
+      warn: {
+        type: 'native',
+        name: 'console.warn',
+        arity: null,
+        call: (vm, args) => consoleWrite(vm, args),
+      },
+      error: {
+        type: 'native',
+        name: 'console.error',
+        arity: null,
+        call: (vm, args) => consoleWrite(vm, args),
+      },
+    },
+  };
+
   const builtins = {
     print: { type:'native', name:'print', arity:1, call:(vm,args)=>{ const s = vm.toStringV(args[0] ?? {type:'null'}); onPrint?.(s); return {type:'null'}; } },
+    console: ConsoleObj,
     Math: MathObj,
     JSON: {
       type: 'obj', map: {
@@ -154,7 +210,66 @@ export function createDefaultEnv({ onPrint }) {
         return { type: 'arr', items, proto: ArrayProto };
       }
     },
+    Promise: {
+      type: 'native',
+      name: 'Promise',
+      arity: 1,
+      map: {
+        prototype: PromiseProto,
+        resolve: {
+          type: 'native', name: 'Promise.resolve', arity: 1,
+          call: (vm, args) => {
+            const v = args[0] ?? { type:'undef' };
+            if (v && v.type === 'promise') return v;
+            const p = vm.createPromise();
+            vm.promiseResolve(p, v);
+            return p;
+          }
+        },
+        reject: {
+          type: 'native', name: 'Promise.reject', arity: 1,
+          call: (vm, args) => {
+            const reason = args[0] ?? { type:'undef' };
+            const p = vm.createPromise();
+            vm.promiseReject(p, reason);
+            return p;
+          }
+        },
+      },
+      call: (vm, args) => {
+        const p = vm.createPromise();
+        const executor = args[0];
+        if (!executor) {
+          vm.promiseReject(p, { type:'str', value:'TypeError: Promise executor is required' });
+          return p;
+        }
+        if (executor.type !== 'native') {
+          vm.promiseReject(p, { type:'str', value:'TypeError: Promise executor currently supports native functions only' });
+          return p;
+        }
+        const resolveFn = {
+          type:'native', name:'Promise.resolveFn', arity:1,
+          call: (vm2, cbArgs) => {
+            vm2.promiseResolve(p, cbArgs[0] ?? { type:'undef' });
+            return { type:'null' };
+          }
+        };
+        const rejectFn = {
+          type:'native', name:'Promise.rejectFn', arity:1,
+          call: (vm2, cbArgs) => {
+            vm2.promiseReject(p, cbArgs[0] ?? { type:'undef' });
+            return { type:'null' };
+          }
+        };
+        try {
+          executor.call(vm, [resolveFn, rejectFn], null);
+        } catch (err) {
+          vm.promiseReject(p, { type:'str', value: String(err?.message ?? err) });
+        }
+        return p;
+      },
+    },
   };
 
-  return { builtins, ObjectProto, StringProto, NumberProto, ArrayProto, NumberProtoMethods };
+  return { builtins, ObjectProto, StringProto, NumberProto, ArrayProto, PromiseProto, NumberProtoMethods };
 }
