@@ -21,11 +21,15 @@ A compiled program is a JSON-serializable object:
   name: string,
   params: string[],
   arity: number,
+  async: boolean,
+  awaitSites: number[],
   consts: ConstValue[],
   code: Instruction[]
 }
 ```
 
+- `async` indicates if the function is async (contains `await` expressions).
+- `awaitSites` is an array of instruction indices where `await` expressions occur.
 - `consts` is a constant pool indexed by `CONST a`.
 - `code` is a linear instruction stream.
 

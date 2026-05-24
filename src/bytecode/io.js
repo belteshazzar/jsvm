@@ -264,6 +264,14 @@ function encodeFunctions(functions) {
       w.u32(line >>> 0);
       w.u32(col >>> 0);
     }
+
+    // Encode async flag and awaitSites array
+    w.u8(f.async ? 1 : 0);
+    const awaits = f.awaitSites ?? [];
+    w.u32(awaits.length);
+    for (const siteIdx of awaits) {
+      w.u32(siteIdx >>> 0);
+    }
   }
   return w.finish();
 }
@@ -296,7 +304,15 @@ function decodeFunctions(r) {
       });
     }
 
-    functions.push({ name, arity, params, code });
+    // Decode async flag and awaitSites array
+    const async = r.u8() === 1;
+    const awaitCount = r.u32();
+    const awaitSites = [];
+    for (let j = 0; j < awaitCount; j++) {
+      awaitSites.push(r.u32());
+    }
+
+    functions.push({ name, arity, params, code, async, awaitSites });
   }
   return functions;
 }

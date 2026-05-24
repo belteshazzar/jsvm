@@ -36,3 +36,39 @@ test('bytecode: version mismatch bundle errors', () => {
   const bad = Buffer.from('nope');
   expect(() => runBundleBuffer(bad, { onPrint: () => {} })).toThrow();
 });
+
+test('bytecode: async/await functions preserved through encode/decode', async () => {
+  // This test verifies that async functions with await keep their async flag
+  // through the bytecode encode/decode cycle. This was a bug where the encoder
+  // didn't save the 'async' flag on function objects.
+  const src = `
+    async function addOneLater(x) {
+      await new Promise(r => setTimeout(r, 1));
+      return x + 1;
+    }
+    
+    async function main() {
+      print("start");
+      const result = await addOneLater(41);
+      print(result);
+    }
+    
+    main();
+  `;
+
+  const expected = printed(src);
+
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'jsvm-async-bytecode-'));
+  const bundlePath = path.join(tmpDir, 'async.bcb');
+
+  // Encode to bytecode
+  const buf = compileBinary(src);
+  await fs.writeFile(bundlePath, buf);
+
+  // Load and run the bytecode
+  const loadedBuf = await fs.readFile(bundlePath);
+  const out = [];
+  await runBundleBuffer(loadedBuf, { onPrint: s => out.push(s) });
+
+  expect(out).toEqual(expected);
+});
