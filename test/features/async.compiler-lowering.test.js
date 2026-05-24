@@ -1,8 +1,8 @@
 import { test, expect } from 'vitest';
 
-import lex from '../../src/lexer.js';
-import parse from '../../src/parser.js';
-import compile from '../../src/compiler.js';
+import lex from '../../src/core/lexer.js';
+import parse from '../../src/core/parser.js';
+import compile from '../../src/core/compiler.js';
 
 function compileSource(src) {
   return compile(parse(lex(src)));

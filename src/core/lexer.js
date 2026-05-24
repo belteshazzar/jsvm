@@ -45,7 +45,7 @@ export default function tokenize(input) {
     'let','const','if','else','while','function','return','true','false','null',
     'class','new','this','extends','super',
     'switch','case','default','for','of','in','break','continue','typeof',
-    'async','await'
+    'async','await','import','from'
   ]);
 
   while (true) {
@@ -177,4 +177,3 @@ export default function tokenize(input) {
 
   return tokens;
 }
-

@@ -1,0 +1,5 @@
+{
+  "test1": 1,
+  "test2": "hello",
+  "test3": { "nested": true }
+}

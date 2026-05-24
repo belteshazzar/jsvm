@@ -1,4 +1,3 @@
-
 import { panic } from './common.js';
 
 export default function parse(tokens) {
@@ -39,6 +38,7 @@ export default function parse(tokens) {
   }
 
   function stmt() {
+    if (at('IMPORT')) return importDecl();
     if (at('LET')) return varDecl();
     if (at('CONST')) return constDecl();
     if (at('IF')) return ifStmt();
@@ -55,6 +55,34 @@ export default function parse(tokens) {
     const e = expr();
     expect('SEMI', "Expected ';' after expression");
     return { type:'ExprStmt', expr:e };
+  }
+
+  function importDecl() {
+    const start = next(); // IMPORT
+    const specifiers = [];
+    if (at('LBRACE')) {
+      next(); // {
+      if (!at('RBRACE')) {
+        do {
+          const nameTok = expect('IDENT', 'Expected imported name');
+          let alias = nameTok.value;
+          // Check for 'as' keyword for renaming
+          if (at('IDENT') && peek().value === 'as') {
+            next(); // consume 'as'
+            const aliasTok = expect('IDENT', 'Expected alias name after as');
+            alias = aliasTok.value;
+          }
+          specifiers.push({ imported: nameTok.value, local: alias });
+        } while (at('COMMA') && next());
+      }
+      expect('RBRACE', "Expected '}' after imports");
+    } else {
+      panic('Default imports not yet supported', start);
+    }
+    expect('FROM', "Expected 'from'");
+    const sourceTok = expect('STRING', 'Expected module source string');
+    expect('SEMI', "Expected ';' after import");
+    return { type: 'ImportDeclaration', specifiers, source: sourceTok.value, loc: locFrom(start) };
   }
 
   function asyncFuncDecl() {

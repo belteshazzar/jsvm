@@ -98,6 +98,14 @@ export default function compile(ast) {
   function compileStmt(fn, s, isLast = false) {
     if (s?.loc) currentLoc = s.loc;
     switch (s.type) {
+      case 'ImportDeclaration':
+        // Emit IMPORT instruction with source name and specifier list
+        emit(fn, 'IMPORT', constIndex({ type: 'str', value: s.source }), constIndex({ type: 'arr', items: s.specifiers.map(spec => ({ type: 'obj', map: { imported: { type: 'str', value: spec.imported }, local: { type: 'str', value: spec.local } } })) }));
+        // Specifiers are bound in the current scope
+        for (const spec of s.specifiers) {
+          emit(fn, 'DEFINE_NAME', spec.local);
+        }
+        break;
       case 'VarDecl':
         if (s.init) compileExpr(fn, s.init); else emit(fn,'CONST',constIndex({type:'null'}));
         emit(fn,'DEFINE_NAME',s.name);

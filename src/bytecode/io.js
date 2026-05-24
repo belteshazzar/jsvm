@@ -1,4 +1,4 @@
-import { panic } from '../common.js';
+import { panic } from '../core/common.js';
 
 // Binary bundle format: JSVB v1
 // Little-endian, chunked.

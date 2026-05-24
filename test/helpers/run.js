@@ -1,8 +1,8 @@
-import lex from '../../src/lexer.js';
-import parse from '../../src/parser.js';
-import compile from '../../src/compiler.js';
-import createVM from '../../src/vm.js';
-import { createDefaultEnv } from '../../src/env.js';
+import lex from '../../src/core/lexer.js';
+import parse from '../../src/core/parser.js';
+import compile from '../../src/core/compiler.js';
+import createVM from '../../src/core/vm.js';
+import { createDefaultEnv } from '../../src/core/env.js';
 
 export function compileSource(src) {
   const toks = lex(src);
@@ -19,6 +19,12 @@ export function runAndCapture(src, options = {}) {
       options.onPrint?.(s);
     }
   });
+  
+  // Pass requestImport through to the VM if provided
+  if (typeof options.requestImport === 'function') {
+    env.requestImport = options.requestImport;
+  }
+  
   const vm = createVM(bc, { env });
   const ret = vm.runMain();
   return { ret, output, bc };

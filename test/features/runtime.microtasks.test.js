@@ -1,10 +1,10 @@
 import { expect, test } from 'vitest';
 
-import lex from '../../src/lexer.js';
-import parse from '../../src/parser.js';
-import compile from '../../src/compiler.js';
-import createVM from '../../src/vm.js';
-import { createDefaultEnv } from '../../src/env.js';
+import lex from '../../src/core/lexer.js';
+import parse from '../../src/core/parser.js';
+import compile from '../../src/core/compiler.js';
+import createVM from '../../src/core/vm.js';
+import { createDefaultEnv } from '../../src/core/env.js';
 
 function makeVM(src, out = [], options = {}) {
   const bc = compile(parse(lex(src)));

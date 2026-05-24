@@ -35,7 +35,17 @@ Conventions:
 - `SCOPE_PUSH`: create a new child lexical environment for the current frame.
 - `SCOPE_POP`: restore the parent lexical environment.
 
-## Control flow
+## Modules
+
+- `IMPORT a b`: load module and extract specifiers.
+  - `a` is a const index for the module source string (module path/name).
+  - `b` is a const index for an array of specifier objects, each with `imported` (export name) and `local` (binding name) properties.
+  - Calls `vm.requestImport(modulePath, specs)` to load the module (host-provided callback).
+  - Extracts exported values for each specifier, caches the loaded module.
+  - Pushes extracted values in reverse order for `DEFINE_NAME` / `DEFINE_CONST` to consume.
+  - Stack: `(...) -> (..., val_n, ..., val_1)` where `val_i` is the i-th specifier's exported value.
+  - Runtime: throws if `requestImport` is not provided or if module loading fails.
+
 
 - `JMP a`: set `ip = a`.
 - `JMP_IF_FALSE a`: if top is falsy, set `ip = a` (does not pop).

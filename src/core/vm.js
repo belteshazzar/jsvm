@@ -32,8 +32,10 @@ export default function createVM(bundle, { env: providedEnv, microtaskLimit = 10
           process.stderr.write(String(message) + '\n');
         }
       };
-
-  // Boxing helpers moved to env.js; not needed here.
+  const requestImport = typeof env.requestImport === 'function' ? env.requestImport : null;
+  
+  // Module cache per VM instance
+  const moduleCache = Object.create(null);
 
   function hydrateConst(v) {
     if (!v) return v;
@@ -732,9 +734,25 @@ export default function createVM(bundle, { env: providedEnv, microtaskLimit = 10
     panic('for..of expects iterable value, got ' + v.type);
   }
 
+  function jsToBoxedValue(v) {
+    if (v === null) return { type: 'null' };
+    if (v === undefined) return { type: 'undef' };
+    if (typeof v === 'number') return { type: 'num', value: v };
+    if (typeof v === 'boolean') return { type: 'bool', value: v };
+    if (typeof v === 'string') return { type: 'str', value: v };
+    if (Array.isArray(v)) return { type: 'arr', items: v.map(jsToBoxedValue), proto: ArrayProto };
+    if (typeof v === 'object') {
+      const o = { type: 'obj', map: Object.create(null), proto: ObjectProto };
+      for (const k of Object.keys(v)) o.map[k] = jsToBoxedValue(v[k]);
+      return o;
+    }
+    return { type: 'undef' };
+  }
+
   // ---- VM core loop ----
   const vm = {
     toStringV,
+    jsToBoxedValue,
     enqueueMicrotask,
     runMicrotasks,
     createPromise: createPromiseValue,
@@ -816,6 +834,75 @@ export default function createVM(bundle, { env: providedEnv, microtaskLimit = 10
           }
 
           case 'MAKE_FUNCTION': stack.push(makeClosure(instr.a, frame.env)); break;
+
+          case 'IMPORT': {
+            if (!requestImport) panic('Import not supported in this VM');
+            const source = consts[instr.a];
+            if (!source || source.type !== 'str') panic('Invalid import source');
+            const specifiersConst = consts[instr.b];
+            if (!specifiersConst || specifiersConst.type !== 'arr') panic('Invalid import specifiers');
+            
+            const modulePath = source.value;
+            
+            // Check module cache first
+            let moduleObj = moduleCache[modulePath];
+            if (!moduleObj) {
+              // Call requestImport to load the module
+              // requestImport(modulePath, specifiers) should return a module object
+              const specs = specifiersConst.items.map(item => {
+                if (!item || item.type !== 'obj') return null;
+                return {
+                  imported: item.map.imported?.value ?? 'default',
+                  local: item.map.local?.value ?? 'default'
+                };
+              });
+              
+              try {
+                moduleObj = requestImport(modulePath, specs);
+                if (!moduleObj) {
+                  panic(`Module '${modulePath}' failed to load: requestImport returned null`);
+                }
+              } catch (err) {
+                panic(`Failed to load module '${modulePath}': ${err?.message ?? err}`);
+              }
+              
+              // Cache the loaded module
+              moduleCache[modulePath] = moduleObj;
+            }
+            
+            // Extract exported values for each specifier and push to stack (in reverse order)
+            const boxedValues = [];
+            for (const item of specifiersConst.items) {
+              if (!item || item.type !== 'obj') {
+                boxedValues.push({ type: 'undef' });
+                continue;
+              }
+              
+              const importedName = item.map.imported?.value ?? 'default';
+              let value;
+              
+              // moduleObj could be a boxed object or a plain JS object from host
+              if (moduleObj.type === 'obj' && moduleObj.map) {
+                // It's already a boxed object
+                value = moduleObj.map[importedName];
+              } else if (typeof moduleObj === 'object') {
+                // It's a plain JS object from host - need to box it
+                const exportedVal = moduleObj[importedName];
+                value = vm.jsToBoxedValue(exportedVal);
+              } else {
+                value = { type: 'undef' };
+              }
+              
+              boxedValues.push(value ?? { type: 'undef' });
+            }
+            
+            // Push values in reverse order so DEFINE_NAME pops them correctly
+            for (let i = boxedValues.length - 1; i >= 0; i--) {
+              stack.push(boxedValues[i]);
+            }
+            
+            break;
+          }
 
           case 'CALL': {
             const argc = instr.a;

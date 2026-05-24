@@ -1,6 +1,6 @@
 import { test, expect } from 'vitest';
-import lex from '../../src/lexer.js';
-import parse from '../../src/parser.js';
+import lex from '../../src/core/lexer.js';
+import parse from '../../src/core/parser.js';
 
 test('lexer recognizes async/await keywords', () => {
   const toks = lex('async function f(){ return await x; }');
