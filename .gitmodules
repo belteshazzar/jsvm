@@ -1,0 +1,12 @@
+[submodule "external/jsvm-bytecode-definition"]
+	path = external/jsvm-bytecode-definition
+	url = https://github.com/belteshazzar/jsvm-bytecode-definition.git
+[submodule "external/jsvm-compiler"]
+	path = external/jsvm-compiler
+	url = https://github.com/belteshazzar/jsvm-compiler.git
+[submodule "external/jsvm-vm-js"]
+	path = external/jsvm-vm-js
+	url = https://github.com/belteshazzar/jsvm-vm-js.git
+[submodule "external/jsvm-c"]
+	path = external/jsvm-c
+	url = https://github.com/belteshazzar/jsvm-c.git
