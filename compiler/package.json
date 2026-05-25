@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "type": "module",
   "main": "src/index.js",
+  "bin": {
+    "jsc": "bin/jsc"
+  },
   "exports": {
     ".": "./src/index.js",
     "./lexer": "./src/lexer.js",
