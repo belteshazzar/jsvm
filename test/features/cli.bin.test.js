@@ -4,37 +4,61 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-const BIN = path.resolve(process.cwd(), 'bin/jsvm');
+const COMPILER_BIN = path.resolve(process.cwd(), 'compiler/bin/jsc');
+const VM_BIN = path.resolve(process.cwd(), 'vm-js/bin/jsvm');
 
-function runCli({ args = [], stdin = null } = {}) {
-  return spawnSync(process.execPath, [BIN, ...args], {
+function runCompiler({ args = [], stdin = null } = {}) {
+  return spawnSync(process.execPath, [COMPILER_BIN, ...args], {
     input: stdin ?? undefined,
     encoding: 'utf8',
   });
 }
 
-describe('CLI bin/jsvm', () => {
-  it('runs code from stdin', () => {
-    const res = runCli({ stdin: 'print(1+2);\n' });
-    expect(res.status).toBe(0);
-    expect(res.stderr).toBe('');
-    expect(res.stdout.trim()).toBe('3');
+function runVm({ args = [], stdin = null } = {}) {
+  return spawnSync(process.execPath, [VM_BIN, ...args], {
+    input: stdin ?? undefined,
+    encoding: 'utf8',
   });
+}
 
-  it('runs code from --file', async () => {
+describe('split CLIs', () => {
+  it('compiles code from stdin and runs the bytecode', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'jsvm-'));
-    const file = path.join(dir, 'prog.js');
-    await fs.writeFile(file, 'print(`a${1+2}b`);\n', 'utf8');
+    const bytecodeFile = path.join(dir, 'prog.bc');
 
-    const res = runCli({ args: ['--file', file] });
-    expect(res.status).toBe(0);
-    expect(res.stderr).toBe('');
-    expect(res.stdout.trim()).toBe('a3b');
+    const compile = runCompiler({ args: ['--out', bytecodeFile], stdin: 'print(1+2);\n' });
+    expect(compile.status).toBe(0);
+    expect(compile.stderr).toBe('');
+
+    const run = runVm({ args: ['--file', bytecodeFile] });
+    expect(run.status).toBe(0);
+    expect(run.stderr).toBe('');
+    expect(run.stdout.trim()).toBe('3');
   });
 
-  it('prints help with --help', () => {
-    const res = runCli({ args: ['--help'] });
-    expect(res.status).toBe(0);
-    expect(res.stdout).toContain('Usage: jsvm');
+  it('compiles code from --file and runs the bytecode', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'jsvm-'));
+    const sourceFile = path.join(dir, 'prog.js');
+    const bytecodeFile = path.join(dir, 'prog.bc');
+    await fs.writeFile(sourceFile, 'print(`a${1+2}b`);\n', 'utf8');
+
+    const compile = runCompiler({ args: ['--file', sourceFile, '--out', bytecodeFile] });
+    expect(compile.status).toBe(0);
+    expect(compile.stderr).toBe('');
+
+    const run = runVm({ args: ['--file', bytecodeFile] });
+    expect(run.status).toBe(0);
+    expect(run.stderr).toBe('');
+    expect(run.stdout.trim()).toBe('a3b');
+  });
+
+  it('prints help for both tools', () => {
+    const compiler = runCompiler({ args: ['--help'] });
+    expect(compiler.status).toBe(0);
+    expect(compiler.stdout).toContain('Usage: jsc');
+
+    const vm = runVm({ args: ['--help'] });
+    expect(vm.status).toBe(0);
+    expect(vm.stdout).toContain('Usage: jsvm');
   });
 });

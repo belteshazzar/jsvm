@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const BIN = path.resolve(process.cwd(), 'bin/jsvm');
+const BIN = path.resolve(process.cwd(), 'compiler/bin/jsc');
 
 function runCli(args, stdin = null) {
   return spawnSync(process.execPath, [BIN, ...args], {
@@ -26,7 +26,7 @@ test('cli: describe bytecode prints imports and exports metadata', async () => {
   `;
   await fs.writeFile(srcPath, src, 'utf8');
 
-  const emit = runCli(['--file', srcPath, '--emit-bytecode', bcPath]);
+  const emit = runCli(['--file', srcPath, '--out', bcPath]);
   expect(emit.status).toBe(0);
 
   const desc = runCli(['--describe-bytecode', bcPath]);

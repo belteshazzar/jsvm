@@ -1,7 +1,7 @@
 {
   "name": "jsvm",
   "version": "1.0.0",
-  "description": "",
+  "description": "Coordination repo for jsvm submodules and cross-runtime parity tests",
   "homepage": "https://github.com/belteshazzar/jsvm#readme",
   "bugs": {
     "url": "https://github.com/belteshazzar/jsvm/issues"
@@ -12,14 +12,12 @@
   },
   "license": "BSD-2-Clause",
   "author": "",
+  "private": true,
   "type": "module",
-  "main": "main.js",
-  "bin": {
-    "jsvm": "bin/jsvm"
-  },
   "scripts": {
-    "test": "vitest --run",
-    "test:watch": "vitest"
+    "test": "npm run test:e2e",
+    "test:watch": "vitest",
+    "test:e2e": "vitest --run test/coordination/e2e.runtimes.test.js"
   },
   "devDependencies": {
     "vitest": "^3.2.4"

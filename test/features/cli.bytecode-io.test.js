@@ -4,14 +4,21 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const BIN = path.resolve(process.cwd(), 'bin/jsvm');
+const COMPILER_BIN = path.resolve(process.cwd(), 'compiler/bin/jsc');
+const VM_BIN = path.resolve(process.cwd(), 'vm-js/bin/jsvm');
 
-function runCli(args, stdin = null) {
-  const res = spawnSync(process.execPath, [BIN, ...args], {
+function runCompiler(args, stdin = null) {
+  return spawnSync(process.execPath, [COMPILER_BIN, ...args], {
     input: stdin ?? undefined,
     encoding: 'utf8',
   });
-  return res;
+}
+
+function runVm(args, stdin = null) {
+  return spawnSync(process.execPath, [VM_BIN, ...args], {
+    input: stdin ?? undefined,
+    encoding: 'utf8',
+  });
 }
 
 test('cli: emit bytecode then run bytecode', async () => {
@@ -21,10 +28,10 @@ test('cli: emit bytecode then run bytecode', async () => {
 
   await fs.writeFile(srcPath, "print('hello');\n", 'utf8');
 
-  const emit = runCli(['--file', srcPath, '--emit-bytecode', bcPath]);
+  const emit = runCompiler(['--file', srcPath, '--out', bcPath]);
   expect(emit.status).toBe(0);
 
-  const run = runCli(['--run-bytecode', bcPath]);
+  const run = runVm(['--file', bcPath]);
   expect(run.status).toBe(0);
   expect(run.stdout.trim().split(/\n+/)).toEqual(['hello']);
 });
