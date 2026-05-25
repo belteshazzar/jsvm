@@ -64,8 +64,8 @@ Non-goals (intentionally omitted from the subset):
 - [x] `console` object (`log`/`info`/`warn`/`error`)
 - [x] Core `Promise` (`Promise.resolve`/`Promise.reject`, `then`/`catch`/`finally`, constructor executors, unhandled rejection policy) — tests: `test/features/promise.core-runtime.test.js`, `test/features/promise.unhandled-rejection.test.js`
 - [x] Timers: `setTimeout(callback, delayMs)` with delay ordering — tests: `test/features/builtins.timers.test.js`
-- [ ] String methods (curated): `slice`, `includes`, `indexOf`, `toUpperCase`, … (currently: `toUpperCase`, `toLowerCase`, `charAt`)
-- [ ] Array method expansions (currently includes `push`, `pop`, `slice`, `indexOf`, `includes`, `join`, `shift`, `unshift`, `splice`, `reverse`, `sort` (no comparator callback), `concat`)
+- [x] String methods (curated): `slice`, `includes`, `indexOf`, `toUpperCase`, … — tests: `test/features/strings.methods.test.js`
+- [x] Array method expansions (currently includes `push`, `pop`, `slice`, `indexOf`, `includes`, `join`, `shift`, `unshift`, `splice`, `reverse`, `sort` (no comparator callback), `concat`) — tests: `test/features/arrays.methods.test.js`
 
 ### Safety
 - [x] Explicit denylist tests: ensure `eval`, `Function`, `globalThis`, `process` cannot be referenced

@@ -32,3 +32,29 @@ print("join='|': " + a.join("|"));
     "join='|': 2|9|x|y",
   ]);
 });
+
+test('Array methods: push/pop/indexOf/includes', () => {
+  const src = `
+let a = [1,2];
+print('push=' + a.push(3,4));
+print('after push a=' + a);
+print('pop=' + a.pop());
+print('after pop a=' + a);
+print('indexOf(2)=' + a.indexOf(2));
+print('indexOf(99)=' + a.indexOf(99));
+print('includes(1)=' + a.includes(1));
+print('includes(99)=' + a.includes(99));
+`;
+
+  const out = printed(src);
+  expect(out).toEqual([
+    'push=4',
+    'after push a=[1, 2, 3, 4]',
+    'pop=4',
+    'after pop a=[1, 2, 3]',
+    'indexOf(2)=1',
+    'indexOf(99)=-1',
+    'includes(1)=true',
+    'includes(99)=false',
+  ]);
+});

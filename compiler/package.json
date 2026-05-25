@@ -1,0 +1,12 @@
+{
+  "name": "jsvm-compiler",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./lexer": "./src/lexer.js",
+    "./parser": "./src/parser.js",
+    "./compiler": "./src/compiler.js"
+  }
+}

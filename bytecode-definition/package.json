@@ -1,0 +1,11 @@
+{
+  "name": "jsvm-bytecode-definition",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./io": "./src/io.js",
+    "./version": "./src/version.js"
+  }
+}
