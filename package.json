@@ -17,7 +17,7 @@
   "scripts": {
     "test": "npm run test:e2e",
     "test:watch": "vitest",
-    "test:e2e": "vitest --run test/coordination/e2e.runtimes.test.js"
+    "test:e2e": "vitest --run test/*.test.js"
   },
   "devDependencies": {
     "vitest": "^3.2.4"

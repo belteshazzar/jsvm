@@ -5,8 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { encodeBundle } from '../../external/jsvm-bytecode-definition/src/index.js';
-import { createVM, createDefaultEnv } from '../../external/jsvm-vm-js/src/index.js';
+import { encodeBundle } from '../external/jsvm-bytecode-definition/src/index.js';
+import { createVM, createDefaultEnv } from '../external/jsvm-vm-js/src/index.js';
 
 const ROOT = path.resolve(process.cwd());
 const C_VM_DIR = path.join(ROOT, 'external', 'jsvm-c');
@@ -54,7 +54,7 @@ async function ensureCompilerDependencyLink() {
 
 async function compileViaExternalCompiler(source) {
   await ensureCompilerDependencyLink();
-  const { compileSource } = await import('../../external/jsvm-compiler/src/index.js');
+  const { compileSource } = await import('../external/jsvm-compiler/src/index.js');
   return compileSource(source);
 }
 
