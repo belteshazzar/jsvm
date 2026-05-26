@@ -14,3 +14,6 @@
 	path = external/jsvm-wasm
 	url = https://github.com/belteshazzar/jsvm-wasm.git
 	branch = main
+[submodule "external/test262"]
+	path = external/test262
+	url = https://github.com/tc39/test262.git
