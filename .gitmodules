@@ -10,3 +10,7 @@
 [submodule "external/jsvm-c"]
 	path = external/jsvm-c
 	url = https://github.com/belteshazzar/jsvm-c.git
+[submodule "external/jsvm-c-wasm"]
+	path = external/jsvm-c-wasm
+	url = https://www.github.com/belteshazzar/jsvm-c-wasm.git
+	branch = main
