@@ -4,13 +4,16 @@
 [submodule "external/jsvm-compiler"]
 	path = external/jsvm-compiler
 	url = https://github.com/belteshazzar/jsvm-compiler.git
-[submodule "external/jsvm-vm-js"]
-	path = external/jsvm-vm-js
+[submodule "external/jsvm-js"]
+	path = external/jsvm-js
 	url = https://github.com/belteshazzar/jsvm-vm-js.git
 [submodule "external/jsvm-c"]
 	path = external/jsvm-c
 	url = https://github.com/belteshazzar/jsvm-c.git
-[submodule "external/jsvm-c-wasm"]
-	path = external/jsvm-c-wasm
-	url = https://www.github.com/belteshazzar/jsvm-c-wasm.git
+[submodule "external/jsvm-wasm"]
+	path = external/jsvm-wasm
+	url = https://www.github.com/belteshazzar/jsvm-wasm.git
 	branch = main
+[submodule "external/jsvm-js"]
+	path = external/jsvm-js
+	url = https://wwww.github.com/belteshazzar/jsvm-js.git
