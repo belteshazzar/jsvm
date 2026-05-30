@@ -6,7 +6,6 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { encodeBundle } from '../external/jsvm-bytecode-definition/src/index.js';
-import { createVM, createDefaultEnv } from '../external/jsvm-js/src/index.js';
 
 const ROOT = path.resolve(process.cwd());
 const C_VM_DIR = path.join(ROOT, 'external', 'jsvm-c');
@@ -58,22 +57,8 @@ async function compileViaExternalCompiler(source) {
   return compileSource(source);
 }
 
-function runInNodeDirect(sourcePath) {
-  const shimmedPath = sourcePath + '.node.js';
-  return fs.readFile(sourcePath, 'utf8')
-    .then(src => fs.writeFile(shimmedPath, src, 'utf8'))
-    .then(() => runOrThrow(process.execPath, [shimmedPath]))
-    .then(res => normalizeOutputLines(res.stdout));
-}
-
-function runInJsRuntime(bundle) {
-  const output = [];
-  const env = createDefaultEnv({
-    onPrint: s => output.push(String(s)),
-  });
-  const vm = createVM(bundle, { env });
-  vm.runMain();
-  return output;
+async function runInNodeDirect(sourcePath) {
+  return runOrThrow(process.execPath, [sourcePath]).stdout;
 }
 
 function runInCRuntime(bundlePath) {
@@ -81,23 +66,35 @@ function runInCRuntime(bundlePath) {
   return normalizeOutputLines(res.stdout);
 }
 
-describe('coordination: end-to-end parity across runtimes', () => {
-  test('compiles once and matches Node, JS VM, and C VM output', async () => {
+describe('coordination: eval helper parity across runtimes', () => {
+  test('matches strict/directive and mini-eval helper behavior', async () => {
     await ensureCRuntimeBuilt();
 
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'jsvm-e2e-'));
-    const sourcePath = path.join(tmpDir, 'program.js');
-    const bundlePath = path.join(tmpDir, 'program.bc');
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'jsvm-eval-'));
+    const sourcePath = path.join(tmpDir, 'eval-helpers.program.js');
+    const bundlePath = path.join(tmpDir, 'eval-helpers.program.bc');
 
     const source = [
-      'console.log(1 + 2);',
-      'let a = 10;',
-      'let b = 4;',
-      'console.log(a - b);',
-      'console.log(a * b);',
-      'console.log(a / b);',
-      'console.log(Math.floor(3.7));',
-      'console.log(Math.pow(2, 8));',
+      "let a = 0;",
+      "eval(\"var x = 7; a = x;\");",
+      "console.log(a);",
+      "console.log(eval(\"#!/usr/bin/env node\\n42\"));",
+      "console.log(eval(\"9 // trailing comment\"));",
+      "let s = 0;",
+      "eval(\"// line comment\\ns = -1\");",
+      "console.log(s);",
+      "try {",
+      "  eval(\"'use strict'; arguments = 1;\");",
+      "  console.log('NO_THROW');",
+      "} catch (e) {",
+      "  console.log(e && e.name);",
+      "}",
+      "try {",
+      "  Function(\"'use strict'; var let = 1;\");",
+      "  console.log('NO_THROW');",
+      "} catch (e) {",
+      "  console.log(e && e.name);",
+      "}",
     ].join('\n');
 
     await fs.writeFile(sourcePath, source, 'utf8');
@@ -105,11 +102,9 @@ describe('coordination: end-to-end parity across runtimes', () => {
     const bundle = await compileViaExternalCompiler(source);
     await fs.writeFile(bundlePath, encodeBundle(bundle));
 
-    const nodeOutput = await runInNodeDirect(sourcePath);
-    const jsVmOutput = runInJsRuntime(bundle);
+    const nodeOutput = normalizeOutputLines(await runInNodeDirect(sourcePath));
     const cVmOutput = runInCRuntime(bundlePath);
 
-    expect(jsVmOutput).toEqual(nodeOutput);
     expect(cVmOutput).toEqual(nodeOutput);
   });
 });

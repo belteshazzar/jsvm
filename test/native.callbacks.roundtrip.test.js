@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 import { encodeBundle, decodeBundle } from '../external/jsvm-bytecode-definition/src/index.js';
-import { createVM, createDefaultEnv } from '../external/jsvm-vm-js/src/index.js';
+import { createVM, createDefaultEnv } from '../external/jsvm-js/src/index.js';
 
 const ROOT = path.resolve(process.cwd());
 const COMPILER_NODE_MODULES = path.join(ROOT, 'external', 'jsvm-compiler', 'node_modules');
@@ -34,7 +34,7 @@ describe('coordination: native callback roundtrip examples', () => {
   test('sync native callback receives params and returns number', async () => {
     const bundle = await compileEncodeDecode([
       'let sum = hostAdd(7, 35);',
-      'print(sum);',
+      'console.log(sum);',
     ].join('\n'));
 
     const output = [];
@@ -66,7 +66,7 @@ describe('coordination: native callback roundtrip examples', () => {
     const bundle = await compileEncodeDecode([
       'async function demo() {',
       '  let doubled = await hostDelayDouble(21);',
-      '  print(doubled);',
+      '  console.log(doubled);',
       '}',
       'demo();',
     ].join('\n'));
